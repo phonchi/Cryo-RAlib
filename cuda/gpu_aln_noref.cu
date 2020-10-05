@@ -1434,16 +1434,16 @@ void BatchHandler::ccf_mult_m(
     const unsigned int  shift_idx,
     const unsigned int  data_idx )
 {
-    // invoke cuda kernel to process the ccf multiplications
-	for ( unsigned int j=0; j<ref_num; j++ ){
+    // invoke cuda kernel to process the ccf multiplications, this will go through all the reference
+	for ( unsigned int j=0; j<ref_batch->img_num; j++ ){
         cu_ccf_mult_m<<< img_num, ccf_table->get_ring_len()/2+1 >>>(
             d_img_data,                        // IN: take all our images and the selected reference
             ref_batch->img_ptr(j),             // IN: ...
-            &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id
+            &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id, no used here
             ccf_table->row_ptr(shift_idx, j),  // OUT: in-row offset for results of given shift and reference, reference 0~n
             ccf_table->row_off(),              // CONST: offset to reach successive rows
             ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
-            ring_num
+            ring_num,
             j);                         // CONST: polar sampling parameters (ring length)
         KERNEL_ERR_CHK();
 	}

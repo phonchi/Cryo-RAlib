@@ -198,6 +198,10 @@ class BatchHandler{
             const BatchHandler* ref_batch,
             const unsigned int  shift_idx,
             const unsigned int  data_idx );
+        void ccf_mult_m(
+            const BatchHandler* ref_batch,
+            const unsigned int  shift_idx,
+            const unsigned int  data_idx );
         void apply_IFFT();
 
         void compute_alignment_param(

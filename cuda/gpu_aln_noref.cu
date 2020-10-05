@@ -360,6 +360,36 @@ extern "C" void pre_align_fetch(
     batch_handler->fetch_data( img_data, 0, img_num );
 }
 
+
+extern "C" void mref_align_run( const int start_idx, const int stop_idx, const int cnx, const int cny ){
+
+    //----------------------------------------------------------------[ setup ]
+
+    // grab batch handlers
+    BatchHandler* ref_batch = aln_res.ref_batch;
+    BatchHandler* sbj_batch = aln_res.sbj_batch;
+
+    // update reference
+    ref_batch->resample_to_polar( 0, 0, 0, aln_res.u_polar_sample_coords );
+    ref_batch->apply_FFT();
+
+    //------------------------------------------------------------[ alignment ]
+
+    for( unsigned int shift_idx=0; shift_idx < aln_res.shifts->size(); shift_idx++ ){
+        sbj_batch->resample_to_polar( 
+            (*aln_res.shifts)[shift_idx][0]+cnx,
+            (*aln_res.shifts)[shift_idx][1]+cny, start_idx,
+            aln_res.u_polar_sample_coords );
+        sbj_batch->apply_FFT();
+        sbj_batch->ccf_mult_m( ref_batch, shift_idx, 0 );
+    }
+    sbj_batch->apply_IFFT();
+    CUDA_ERR_CHK( cudaDeviceSynchronize() );
+
+    sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
+}
+
+
 extern "C" void pre_align_run( const int start_idx, const int stop_idx ){
 
     //----------------------------------------------------------------[ setup ]
@@ -847,6 +877,135 @@ __global__ void cu_ccf_mult(
     */
 }
 
+// Build cid list in main loop!!!!!!!!!!!!!
+__global__ void cu_ccf_mult_m( 
+    const float*       sbj_batch_ptr, 
+    const float*       ref_batch_ptr, 
+    const AlignParam*  u_aln_param,
+    float*             batch_table_row_ptr, 
+    const unsigned int batch_table_row_offset, 
+    const unsigned int batch_table_mirror_offset,
+    const unsigned int ring_num,
+    const unsigned int refid )
+{
+    /*
+    This kernel is used to compute the cross correlation function of two images, which can be expressed
+    as FFT(img_a)' x FFT(img_b). This computation boils down to a number of scalar products with an
+    additional factor for weighting the individual rings of the polar representation of the data.
+    Note that the function parameters are float* but the values they are pointing to are interpreted as
+    complex values -- i.e. every two floats denote a single complex value's real and imaginary parts.
+    For details on the cross correlation, see: http://paulbourke.net/miscellaneous/correlate/
+    For a walkthrough to the computation, see: https://pastebin.com/zVi13qRZ
+    */
+
+    /* Pattern of memory writes
+
+    Each block processes one sbj img and computes its ccf values with the given ref img (the latter is the
+    same across all blocks). Note that, at this point, the data is in complex values so the below code
+    implements a complex value multiplication.
+       We also immediately compute the values for the mirrored subject image. This can be done by multi-
+    plying using the complex conjugate (representing a y-axis flipped image). Consequently, each thread
+    computes two multiplications and writes two complex result values (four float values).
+
+    Memory layout and access pattern during kernel execution is as follows:
+
+      __ <batch_table_row_ptr> address indicates reference slot (+--+) to be filled in row_0
+     /
+    V
+    [--+--+--+--] .. [--+--+--+--] || [--+--+--+--] .. [--+--+--+--]    First kernel call, given shift_0:
+    [--+--+--+--] .. [--+--+--+--] || [--+--+--+--] .. [--+--+--+--]    compute ccf of all sbj imgs and ref_0
+    :           :    :           :    :           :                :
+    [--+--+--+--] .. [--+--+--+--] || [--+--+--+--] .. [--+--+--+--]
+
+       V
+    [==+--+--+--] .. [--+--+--+--] || [==+--+--+--] .. [--+--+--+--]    Second kernel call, given shift_0:
+    [==+--+--+--] .. [--+--+--+--] || [==+--+--+--] .. [--+--+--+--]    compute ccf of all sbj imgs and ref_1
+    :           :    :           :    :           :                :
+    [==+--+--+--] .. [--+--+--+--] || [==+--+--+--] .. [--+--+--+--]
+
+          V
+    [==+==+--+--] .. [--+--+--+--] || [==+==+--+--] .. [--+--+--+--]    Third kernel call, given shift_0:
+    [==+==+--+--] .. [--+--+--+--] || [==+==+--+--] .. [--+--+--+--]    compute ccf of all sbj imgs and ref_3
+    :           :    :           :    :           :                :
+    [==+==+--+--] .. [--+--+--+--] || [==+==+--+--] .. [--+--+--+--]
+
+    (..)
+
+    [==+==+==+==] .. [--+--+--+--] || [==+==+==+==] .. [--+--+--+--]    After final kernel call, given shift_0:
+    [==+==+==+==] .. [--+--+--+--] || [==+==+==+==] .. [--+--+--+--]    compute ccf of all sbj imgs and ref_N
+    :           :    :           :    :           :    :           :
+    [==+==+==+==] .. [--+--+--+--] || [==+==+==+==] .. [--+--+--+--]
+
+    (..)
+
+    [==+==+==+==] .. [==+==+==+==] || [==+==+==+==] .. [==+==+==+==]    After final kernel call, given all
+    [==+==+==+==] .. [==+==+==+==] || [==+==+==+==] .. [==+==+==+==]    shifts.
+    :           :    :           :    :           :                :
+    [==+==+==+==] .. [==+==+==+==] || [==+==+==+==] .. [==+==+==+==]
+
+    \__/ blockDim.x*2                              For each given shift, kernel will be called once per
+                                                   reference. Afterwards, the batch_table column block for 
+    \___________/ blockDim.x*2 * ref_num           the current x/y shift is filled w/ the ccf results of 
+                                                   each subject image for all references.
+    */
+
+    // grid indices
+    unsigned int bid = blockIdx.x;
+    unsigned int tid = threadIdx.x;
+
+    // each block picks their reference (NOTE: blockDim.x*2 == ring_len+2)
+    //ref_batch_ptr = &ref_batch_ptr[ u_aln_param[bid].ref_id * (blockDim.x*2)*ring_num ];
+    ref_batch_ptr = &ref_batch_ptr[ refid * (blockDim.x*2)*ring_num ];
+
+    // each block picks their image (NOTE: blockDim.x*2 == ring_len+2)
+    unsigned int sbj_idx = bid * blockDim.x*2*ring_num;  // img_index x img_size
+
+    float ccf_orig_r=0.0f, ccf_orig_i=0.0f, ccf_mirr_r=0.0f, ccf_mirr_i=0.0f;
+    for( unsigned int i=0; i<ring_num; i++ ){
+
+        // determine element offsets
+        unsigned int ref_elem_idx = i*blockDim.x*2 + tid*2;  // select element in reference image
+        unsigned int sbj_elem_idx = sbj_idx + ref_elem_idx;  // select element in subject image
+        // read out element data
+        float rr = ref_batch_ptr[ ref_elem_idx+0 ];  // ref elem real part
+        float ri = ref_batch_ptr[ ref_elem_idx+1 ];  // ref elem imag part
+        float sr = sbj_batch_ptr[ sbj_elem_idx+0 ];  // sbj elem real part
+        float si = sbj_batch_ptr[ sbj_elem_idx+1 ];  // sbj elem imag part
+        // tmps
+        float rr_sr = rr * sr;
+        float ri_si = ri * si;
+        float rr_si = rr * si;
+        float ri_sr = ri * sr;
+        // weighted ccf values (for original and mirrored sbj image)
+        ccf_orig_r += ( rr_sr+ri_si) * (i+1);
+        ccf_orig_i += (-rr_si+ri_sr) * (i+1);
+        ccf_mirr_r += ( rr_sr-ri_si) * (i+1);
+        ccf_mirr_i += (-rr_si-ri_sr) * (i+1);
+    }
+
+    // write results
+    unsigned int table_idx = blockIdx.x*batch_table_row_offset + tid*2;  // select row and elem_offset
+    batch_table_row_ptr[ table_idx+0 ] = ccf_orig_r;
+    batch_table_row_ptr[ table_idx+1 ] = ccf_orig_i;
+    batch_table_row_ptr[ table_idx+batch_table_mirror_offset+0 ] = ccf_mirr_r;
+    batch_table_row_ptr[ table_idx+batch_table_mirror_offset+1 ] = ccf_mirr_i;
+
+    /*
+    NOTE: We can get rid of the internal weight-multiplication and apply it instead to
+    the references as a pre-process. Here's why that should work:
+
+    ccf_orig += (rr_sr+ri_si) * (i+1);
+             += rr_sr*(i+1) + ri_si*(i+1);
+             += (rr*sr)*(i+1) + (ri*si)*(i+1);
+             += rr*(i+1)*sr + ri*(i+1)*si;)
+
+    -> In each iteration the same constant (i+1) value it multiplied on the same constant
+       reference value. We can do that beforehand and avoid four multiplications per loop
+
+    It does not safe that much time though. 
+    */
+}
+
 __global__ void cu_transform_batch( 
     const cudaTextureObject_t img_src_tex,         // take the img data in this texture
     const unsigned int        img_dim_y,           // images in the texture will have this y-dim
@@ -1263,11 +1422,31 @@ void BatchHandler::ccf_mult(
         d_img_data,                        // IN: take all our images and the selected reference
         ref_batch->img_ptr(0),             // IN: ...
         &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id
-        ccf_table->row_ptr(shift_idx, 0),  // OUT: in-row offset for results of given shift and reference
+        ccf_table->row_ptr(shift_idx, 0),  // OUT: in-row offset for results of given shift and reference, reference 0~n
         ccf_table->row_off(),              // CONST: offset to reach successive rows
         ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
         ring_num);                         // CONST: polar sampling parameters (ring length)
     KERNEL_ERR_CHK();
+}
+
+void BatchHandler::ccf_mult_m(
+    const BatchHandler* ref_batch,
+    const unsigned int  shift_idx,
+    const unsigned int  data_idx )
+{
+    // invoke cuda kernel to process the ccf multiplications
+	for ( unsigned int j=0; j<ref_num; j++ ){
+        cu_ccf_mult_m<<< img_num, ccf_table->get_ring_len()/2+1 >>>(
+            d_img_data,                        // IN: take all our images and the selected reference
+            ref_batch->img_ptr(j),             // IN: ...
+            &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id
+            ccf_table->row_ptr(shift_idx, j),  // OUT: in-row offset for results of given shift and reference, reference 0~n
+            ccf_table->row_off(),              // CONST: offset to reach successive rows
+            ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
+            ring_num
+            j);                         // CONST: polar sampling parameters (ring length)
+        KERNEL_ERR_CHK();
+	}
 }
 
 void BatchHandler::apply_IFFT(){ ccf_table->apply_IFFT(); }
@@ -1872,3 +2051,4 @@ int main_0( int argc, const char** argv ){
     printf( "All done.\n" );
     return EXIT_SUCCESS;
 }
+

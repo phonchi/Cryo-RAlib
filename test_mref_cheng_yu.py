@@ -6,12 +6,201 @@ import global_def
 from global_def import *
 from optparse import OptionParser
 import sys
+import sparx as spx
 
+###############################################################
+########################################################### GPU
+
+import math
+import numpy as np
+import ctypes
+from EMAN2 import EMNumPy
+
+CUDA_PATH = os.path.join(os.path.dirname(__file__),  "..", "cuda", "")
+cu_module = ctypes.CDLL( CUDA_PATH + "gpu_aln_pack.so" )
+float_ptr = ctypes.POINTER(ctypes.c_float)
+
+cu_module.ref_free_alignment_2D_init.restype = ctypes.c_ulonglong
+cu_module.pre_align_init.restype = ctypes.c_ulonglong
+
+class Freezeable( object ):
+
+    def freeze( self ):
+        self._frozen = None
+
+    def __setattr__( self, name, value ):
+        if hasattr( self, '_frozen' )and not hasattr( self, name ):
+            raise AttributeError( "Error! Trying to add new attribute '%s' to frozen class '%s'!" % (name,self.__class__.__name__) )
+        object.__setattr__( self, name, value )
+
+class AlignConfig( ctypes.Structure, Freezeable ):
+    _fields_ = [ # data param
+                 ("sbj_num", ctypes.c_uint),            # number of subject images we want to align
+                 ("ref_num", ctypes.c_uint),            # number of reference images we want to align the subjects to
+                 ("img_dim", ctypes.c_uint),            # image dimension (in both x- and y-direction)
+                 # polar sampling parameters
+                 ("ring_num", ctypes.c_uint),           # number of rings when converting images to polar coordinates
+                 ("ring_len", ctypes.c_uint),           # number of rings when converting images to polar coordinates
+                 # shift parameters
+                 ("shift_step",  ctypes.c_float),        # step range when applying translational shifts
+                 ("shift_rng_x", ctypes.c_float),        # translational shift range in x-direction
+                 ("shift_rng_y", ctypes.c_float) ]       # translational shift range in y-direction
+
+class AlignParam( ctypes.Structure, Freezeable ):
+    _fields_ = [ ("sbj_id",  ctypes.c_int),
+                 ("ref_id",  ctypes.c_int),
+                 ("shift_x", ctypes.c_float),
+                 ("shift_y", ctypes.c_float),
+                 ("angle",   ctypes.c_float),
+                 ("mirror",  ctypes.c_bool) ]
+    def __str__(self):
+            return "s_%d/r_%d::(%d,%d;%.2f)" % (self.sbj_id, self.ref_id, self.shift_x, self.shift_y, self.angle) \
+                    +("[M]" if self.mirror else "")
+
+aln_param_ptr = ctypes.POINTER(AlignParam)
+
+def get_c_ptr_array( emdata_list ):
+    ptr_list = []
+    for img in emdata_list:
+        img_np = EMNumPy.em2numpy( img )
+        assert img_np.flags['C_CONTIGUOUS'] == True
+        assert img_np.dtype == np.float32
+        img_ptr = img_np.ctypes.data_as(float_ptr)
+        ptr_list.append(img_ptr)
+    return (float_ptr*len(emdata_list))(*ptr_list)
+
+def print_gpu_info( cuda_device_id ):
+    cu_module.print_gpu_info( ctypes.c_int(cuda_device_id) )
+
+########################################################### GPU
+###############################################################
 def mref_ali2d_gpu(
     stack, refim, outdir, maskfile=None, ir=1, ou=-1, rs=1, xrng = 0, yrng = 0, step = 1,
     center=-1, maxit=0, CTF=False, snr=1.0,
     user_func_name="ref_ali2d", rand_seed= 1000, number_of_proc = 1, myid = 0, main_node = 0, mpi_comm = None, 
     mpi_gpu_proc=False, gpu_class_limit=0, cuda_device_occ=0.9):
+	
+	from sp_utilities      import   model_circle, combine_params2, inverse_transform2, drop_image, get_image, get_im
+    from sp_utilities      import   reduce_EMData_to_root, bcast_EMData_to_all, bcast_number_to_all
+    from sp_utilities      import   send_attr_dict
+    from sp_utilities        import   center_2D
+    from sp_statistics     import   fsc_mask
+    from sp_alignment      import   Numrinit, ringwe, search_range
+    from sp_fundamentals   import   rot_shift2D, fshift
+    from sp_utilities      import   get_params2D, set_params2D
+    from random         import   seed, randint
+    from sp_morphology     import   ctf_2
+    from sp_filter         import   filt_btwl, filt_params
+    from numpy          import   reshape, shape
+    from sp_utilities      import   print_msg, print_begin_msg, print_end_msg
+    import os
+    import sys
+    import util
+    from sp_applications   import MPI_start_end
+    from mpi       import mpi_comm_size, mpi_comm_rank, MPI_COMM_WORLD
+    from mpi       import mpi_reduce, mpi_bcast, mpi_barrier, mpi_recv, mpi_send
+    from mpi       import MPI_SUM, MPI_FLOAT, MPI_INT
+
+    import sp_user_functions
+    from sp_applications   import MPI_start_end
+    user_func = sp_user_functions.factory[user_func_name]
+
+    # sanity check: gpu procs sound off
+    if not mpi_gpu_proc: return []
+
+    #----------------------------------[ setup ]
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: MPI proc["+str(myid)+"] run pre-alignment CPU setup" )
+
+    # mpi communicator sanity check
+    assert mpi_comm != None
+
+    # polar conversion (ring) parameters
+    first_ring = int(ir)
+    last_ring  = int(ou)
+    rstep      = int(rs)
+    max_iter   = int(maxit)
+
+    if max_iter ==0:
+    	max_iter = 10
+    	auto_stop = True
+    else:
+    	auto_stop = False
+
+	# determine global index values of particles handled by this process
+    data = stack
+    total_nima = len(data)
+    total_nima = mpi.mpi_reduce(total_nima, 1, mpi.MPI_INT, mpi.MPI_SUM, 0, mpi_comm)
+    total_nima = mpi.mpi_bcast (total_nima, 1, mpi.MPI_INT, main_node, mpi_comm)[0]
+
+    list_of_particles = list(range(total_nima))
+    image_start, image_end = MPI_start_end(total_nima, number_of_proc, myid)
+    list_of_particles = list_of_particles[image_start:image_end] # list of global indices
+
+    nima = len(list_of_particles)
+    assert( nima == len(data) ) # sanity check
+
+    # read nx and broadcast to all nodes
+    # NOTE: nx is image size and images are assumed to be square
+    if myid == main_node:
+        nx = data[0].get_xsize()
+    else:
+        nx = 0
+    nx = util.bcast_number_to_all(nx, source_node=main_node, mpi_comm=mpi_comm)
+
+    if CTF:
+        phase_flip = True
+    else:
+        phase_flip = False
+
+    CTF = False # okay..?
+
+    # set default value for the last ring if none given
+    if last_ring == -1: last_ring = nx/2-2
+
+    # sanity check for last_ring value
+    if last_ring + max([max(xrng), max(yrng)]) > (nx-1) // 2:
+        ERROR( "Shift or radius is too large - particle crosses image boundary", "ali2d_MPI", 1 )
+
+    if maskfile:
+        import  types
+        if type(maskfile) is bytes:  mask = get_image(maskfile)
+        else: mask = maskfile
+    else : mask = model_circle(last_ring, nx, nx)
+
+    # references, do them on all processors
+    refi = []
+    numref = EMUtil.get_image_count(refim)
+    # image center
+    cny = cnx = nx/2+1
+    mode = "F"
+
+    # prepare reference images on all nodes
+    ima = data[0]
+    ima.to_zero()
+    for j in range(numref):
+        #  even, odd, numer of even, number of images.  After frc, totav
+        refi.append([get_im(refim,j), ima.copy(), 0])
+
+	# create/reset alignment parameters
+    for im in range(nima):
+        data[im].set_attr( 'ID', list_of_particles[im] )
+        util.set_params2D( data[im], [0.0, 0.0, 0.0, 0, 1.0], 'xform.align2d' )
+        st = Util.infomask( data[im], mask, False )
+        data[im] -= st[0]
+        if phase_flip:
+            data[im] = filt_ctf(data[im], data[im].get_attr("ctf"), binary = True)
+
+    # precalculate rings & weights
+    numr = alignment.Numrinit( first_ring, last_ring, rstep, mode )
+    wr   = alignment.ringwe( numr, mode )
+
+    if myid == main_node:  
+		seed(rand_seed)
+		ref_data = [mask, center, None, None]
+		a0 = -1.0
+
+
+    
 
 
 
@@ -119,7 +308,7 @@ def mref_ali2d_MPI(stack, refim, outdir, maskfile = None, ir=1, ou=-1, rs=1, xrn
     # prepare reference images on all nodes
     ima.to_zero()
     for j in range(numref):
-        #  even, odd, numer of even, number of images.  After frc, totav
+        #  even, odd, number of even, number of images.  After frc, totav
         refi.append([get_im(refim,j), ima.copy(), 0])
     #  for each node read its share of data
     data = EMData.read_images(stack, list(range(image_start, image_end)))

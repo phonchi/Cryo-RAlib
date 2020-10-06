@@ -390,6 +390,7 @@ extern "C" void mref_align_run( const int start_idx, const int stop_idx){
 }
 
 
+
 extern "C" void pre_align_run( const int start_idx, const int stop_idx ){
 
     //----------------------------------------------------------------[ setup ]
@@ -876,6 +877,7 @@ __global__ void cu_ccf_mult(
     It does not safe that much time though. 
     */
 }
+
 
 // Build cid list in main loop!!!!!!!!!!!!!
 __global__ void cu_ccf_mult_m( 
@@ -1422,12 +1424,13 @@ void BatchHandler::ccf_mult(
         d_img_data,                        // IN: take all our images and the selected reference
         ref_batch->img_ptr(0),             // IN: ...
         &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id
-        ccf_table->row_ptr(shift_idx, 0),  // OUT: in-row offset for results of given shift and reference, reference 0~n
+        ccf_table->row_ptr(shift_idx, 0),  // OUT: in-row offset for results of given shift and reference
         ccf_table->row_off(),              // CONST: offset to reach successive rows
         ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
         ring_num);                         // CONST: polar sampling parameters (ring length)
     KERNEL_ERR_CHK();
 }
+
 
 void BatchHandler::ccf_mult_m(
     const BatchHandler* ref_batch,
@@ -1448,6 +1451,7 @@ void BatchHandler::ccf_mult_m(
         KERNEL_ERR_CHK();
 	}
 }
+
 
 void BatchHandler::apply_IFFT(){ ccf_table->apply_IFFT(); }
 
@@ -2051,4 +2055,3 @@ int main_0( int argc, const char** argv ){
     printf( "All done.\n" );
     return EXIT_SUCCESS;
 }
-

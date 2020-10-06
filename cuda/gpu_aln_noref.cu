@@ -887,8 +887,7 @@ __global__ void cu_ccf_mult_m(
     float*             batch_table_row_ptr, 
     const unsigned int batch_table_row_offset, 
     const unsigned int batch_table_mirror_offset,
-    const unsigned int ring_num,
-    const unsigned int refid )
+    const unsigned int ring_num)
 {
     /*
     This kernel is used to compute the cross correlation function of two images, which can be expressed
@@ -957,7 +956,7 @@ __global__ void cu_ccf_mult_m(
 
     // each block picks their reference (NOTE: blockDim.x*2 == ring_len+2)
     //ref_batch_ptr = &ref_batch_ptr[ u_aln_param[bid].ref_id * (blockDim.x*2)*ring_num ];
-    ref_batch_ptr = &ref_batch_ptr[ refid * (blockDim.x*2)*ring_num ];
+    //ref_batch_ptr = &ref_batch_ptr[ refid * (blockDim.x*2)*ring_num ];
 
     // each block picks their image (NOTE: blockDim.x*2 == ring_len+2)
     unsigned int sbj_idx = bid * blockDim.x*2*ring_num;  // img_index x img_size
@@ -1446,8 +1445,7 @@ void BatchHandler::ccf_mult_m(
             ccf_table->row_ptr(shift_idx, j),  // OUT: in-row offset for results of given shift and reference, reference 0~n
             ccf_table->row_off(),              // CONST: offset to reach successive rows
             ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
-            ring_num,
-            j);                         // CONST: polar sampling parameters (ring length)
+            ring_num);                         // CONST: polar sampling parameters (ring length)
         KERNEL_ERR_CHK();
 	}
 }
@@ -1627,7 +1625,7 @@ CcfResultTable::CcfResultTable( const AlignConfig* batch_cfg ){
 
     // get parameters
     sbj_num = batch_cfg->sbj_num;
-    ref_num = 1; // for reference free alignment each sbj img only compares with its own, single, reference
+    ref_num = batch_cfg->ref_num; // for reference free alignment each sbj img only compares with its own, single, reference
 
     ring_num = batch_cfg->ring_num;
     ring_len = batch_cfg->ring_len;

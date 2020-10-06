@@ -1,0 +1,143 @@
+ref_ali2d   #     0
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          -9.236        Center y       =     -0.586
+ref_ali2d   #     1
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          17.241        Center y       =      7.113
+ref_ali2d   #     2
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.715        Center y       =    -12.164
+ITERATION #  1        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #     3
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           1.611        Center y       =     -0.575
+ref_ali2d   #     4
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =         -65.000        Center y       =    -65.000
+ref_ali2d   #     5
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ITERATION #  2        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #     6
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          -0.223        Center y       =     -0.524
+ref_ali2d   #     7
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ref_ali2d   #     8
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.715        Center y       =    -12.164
+ITERATION #  3        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #     9
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.798        Center y       =      0.607
+ref_ali2d   #    10
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          17.241        Center y       =      7.113
+ref_ali2d   #    11
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =         -65.000        Center y       =    -65.000
+ITERATION #  4        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #    12
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          -0.563        Center y       =     -0.365
+ref_ali2d   #    13
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.715        Center y       =    -12.164
+ref_ali2d   #    14
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ITERATION #  5        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #    15
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.767        Center y       =      0.610
+ref_ali2d   #    16
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ref_ali2d   #    17
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =         -65.000        Center y       =    -65.000
+ITERATION #  6        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #    18
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          -0.488        Center y       =     -0.356
+ref_ali2d   #    19
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.715        Center y       =    -12.164
+ref_ali2d   #    20
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =         -65.000        Center y       =    -65.000
+ITERATION #  7        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #    21
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.747        Center y       =      0.622
+ref_ali2d   #    22
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ref_ali2d   #    23
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =         -65.000        Center y       =    -65.000
+ITERATION #  8        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #    24
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          -0.492        Center y       =     -0.333
+ref_ali2d   #    25
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =          17.241        Center y       =      7.113
+ref_ali2d   #    26
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ITERATION #  9        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+ref_ali2d   #    27
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.532        Center y       =      0.738
+ref_ali2d   #    28
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           6.548        Center y       =      0.866
+ref_ali2d   #    29
+Tangent filter:  cut-off frequency =      0.400        fall-off =      0.200
+Center x =           0.715        Center y       =    -12.164
+ITERATION # 10        1
+
+   group #  0   number of particles =      15
+   group #  1   number of particles =       0
+   group #  2   number of particles =       0
+****************************************************************************************************
+                    End of the program mref_ali2d_GPU: Tue, 06 Oct 2020 18:38:59
+****************************************************************************************************

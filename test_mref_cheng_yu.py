@@ -79,8 +79,8 @@ def mref_ali2d_gpu(
     center=-1, maxit=0, CTF=False, snr=1.0,
     user_func_name="ref_ali2d", rand_seed= 1000, number_of_proc = 1, myid = 0, main_node = 0, mpi_comm = None, 
     mpi_gpu_proc=False, gpu_class_limit=0, cuda_device_occ=0.9):
-	
-	from sp_utilities      import   model_circle, combine_params2, inverse_transform2, drop_image, get_image, get_im
+
+    from sp_utilities      import   model_circle, combine_params2, inverse_transform2, drop_image, get_image, get_im
     from sp_utilities      import   reduce_EMData_to_root, bcast_EMData_to_all, bcast_number_to_all
     from sp_utilities      import   send_attr_dict
     from sp_utilities        import   center_2D
@@ -107,6 +107,7 @@ def mref_ali2d_gpu(
 
     # sanity check: gpu procs sound off
     if not mpi_gpu_proc: return []
+
 
     #----------------------------------[ setup ]
     print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: MPI proc["+str(myid)+"] run pre-alignment CPU setup" )
@@ -195,11 +196,11 @@ def mref_ali2d_gpu(
     wr   = alignment.ringwe( numr, mode )
 
     if myid == main_node:  
-		seed(rand_seed)
-		ref_data = [mask, center, None, None]
-		a0 = -1.0
+        seed(rand_seed)
+        ref_data = [mask, center, None, None]
+        a0 = -1.0
 
-	recvcount = []
+    recvcount = []
     disp = []
     for i in range(number_of_proc):
         ib, ie = MPI_start_end(total_nima, number_of_proc, i)
@@ -210,8 +211,8 @@ def mref_ali2d_gpu(
             disp.append(disp[i-1]+recvcount[i-1])
 
 
-	again = True
-	total_iter = 0
+    again = True
+    total_iter = 0
 
 	#----------------------------------[ gpu setup ]
 
@@ -260,6 +261,11 @@ def mref_ali2d_gpu(
     # set gpu search parameters
     cu_module.reset_shifts( ctypes.c_float(xrng[N_step]), ctypes.c_float(step[N_step]) )
 
+	
+    for Iter in range(max_iter):
+        total_iter += 1
+
+		#----------------------------------[ construct new average]
 
 	
 

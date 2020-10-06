@@ -71,7 +71,11 @@ extern "C" void pre_align_fetch(
     const unsigned int img_num,
     const char* batch_type );
 
+
+
 extern "C" void pre_align_run( const int start_idx, const int stop_idx );
+extern "C" void mref_align_run( const int start_idx, const int stop_idx );
+
 
 //-------------------------------------------------[ reference-free alignment ]
 
@@ -195,6 +199,10 @@ class BatchHandler{
             const float*       u_polar_sample_coords );
         void apply_FFT();
         void ccf_mult(
+            const BatchHandler* ref_batch,
+            const unsigned int  shift_idx,
+            const unsigned int  data_idx );
+        void ccf_mult_m(
             const BatchHandler* ref_batch,
             const unsigned int  shift_idx,
             const unsigned int  data_idx );

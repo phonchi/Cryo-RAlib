@@ -361,7 +361,7 @@ extern "C" void pre_align_fetch(
 }
 
 
-extern "C" void mref_align_run( const int start_idx, const int stop_idx, const int cnx, const int cny ){
+extern "C" void mref_align_run( const int start_idx, const int stop_idx){
 
     //----------------------------------------------------------------[ setup ]
 
@@ -377,8 +377,8 @@ extern "C" void mref_align_run( const int start_idx, const int stop_idx, const i
 
     for( unsigned int shift_idx=0; shift_idx < aln_res.shifts->size(); shift_idx++ ){
         sbj_batch->resample_to_polar( 
-            (*aln_res.shifts)[shift_idx][0]+cnx,
-            (*aln_res.shifts)[shift_idx][1]+cny, start_idx,
+            (*aln_res.shifts)[shift_idx][0],
+            (*aln_res.shifts)[shift_idx][1], start_idx,
             aln_res.u_polar_sample_coords );
         sbj_batch->apply_FFT();
         sbj_batch->ccf_mult_m( ref_batch, shift_idx, 0 );

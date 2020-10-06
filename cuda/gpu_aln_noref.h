@@ -71,7 +71,11 @@ extern "C" void pre_align_fetch(
     const unsigned int img_num,
     const char* batch_type );
 
+
+
 extern "C" void pre_align_run( const int start_idx, const int stop_idx );
+extern "C" void mref_align_run( const int start_idx, const int stop_idx );
+
 
 //-------------------------------------------------[ reference-free alignment ]
 

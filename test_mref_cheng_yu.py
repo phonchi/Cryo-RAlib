@@ -16,7 +16,7 @@ import numpy as np
 import ctypes
 from EMAN2 import EMNumPy
 
-CUDA_PATH = os.path.join(os.path.dirname(__file__),  "..", "cuda", "")
+CUDA_PATH = os.path.join(os.path.dirname(__file__),  "cuda", "")
 cu_module = ctypes.CDLL( CUDA_PATH + "gpu_aln_pack.so" )
 float_ptr = ctypes.POINTER(ctypes.c_float)
 
@@ -75,7 +75,7 @@ def print_gpu_info( cuda_device_id ):
 ########################################################### GPU
 ###############################################################
 def mref_ali2d_gpu(
-    stack, refim, outdir, maskfile=None, ir=1, ou=-1, rs=1, xrng = 0, yrng = 0, step = 1,
+    filename,stack, refim, outdir, maskfile=None, ir=1, ou=-1, rs=1, xrng = 0, yrng = 0, step = 1,
     center=-1, maxit=0, CTF=False, snr=1.0,
     user_func_name="ref_ali2d", rand_seed= 1000, number_of_proc = 1, myid = 0, main_node = 0, mpi_comm = None, 
     mpi_gpu_proc=False, gpu_class_limit=0, cuda_device_occ=0.9):
@@ -94,8 +94,12 @@ def mref_ali2d_gpu(
     from numpy          import   reshape, shape
     from sp_utilities      import   print_msg, print_begin_msg, print_end_msg
     import os
+    import alignment
+    import fundamentals
     import sys
-    import util
+    import mpi
+    import time
+    import utilities as util
     from sp_applications   import MPI_start_end
     from mpi       import mpi_comm_size, mpi_comm_rank, MPI_COMM_WORLD
     from mpi       import mpi_reduce, mpi_bcast, mpi_barrier, mpi_recv, mpi_send
@@ -114,7 +118,10 @@ def mref_ali2d_gpu(
 
     # mpi communicator sanity check
     assert mpi_comm != None
-
+    
+    xrng = [xrng]
+    yrng = [yrng]
+    step = [step]
     # polar conversion (ring) parameters
     first_ring = int(ir)
     last_ring  = int(ou)
@@ -159,7 +166,7 @@ def mref_ali2d_gpu(
     if last_ring == -1: last_ring = nx/2-2
 
     # sanity check for last_ring value
-    if last_ring + max([max(xrng), max(yrng)]) > (nx-1) // 2:
+    if last_ring + max([max(xrng),max(yrng)]) > (nx-1) // 2:
         ERROR( "Shift or radius is too large - particle crosses image boundary", "ali2d_MPI", 1 )
 
     if maskfile:
@@ -197,7 +204,6 @@ def mref_ali2d_gpu(
 
     if myid == main_node:  
         seed(rand_seed)
-        ref_data = [mask, center, None, None]
         a0 = -1.0
 
     again = True
@@ -251,12 +257,14 @@ def mref_ali2d_gpu(
     # set gpu search parameters
     cu_module.reset_shifts( ctypes.c_float(xrng[N_step]), ctypes.c_float(step[N_step]) )
         
-    cu_module.pre_align_fetch(
-        get_c_ptr_array([tmp[0] for tmp in refi]),
-        ctypes.c_uint(numref), 
-        ctypes.c_char_p("ref_batch"))
+
     
     while Iter < max_iter and again:
+        
+        cu_module.pre_align_fetch(
+            get_c_ptr_array([tmp[0] for tmp in refi]),
+            ctypes.c_uint(numref), 
+            ctypes.c_char_p("ref_batch"))
         
         # backup last iteration's alignment parameters
         old_ali_params = []
@@ -300,9 +308,9 @@ def mref_ali2d_gpu(
         # < ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FOR gpu_batch_i DO
         #set reference image to zero
         for j in range(numref):
-        refi[j][0].to_zero()
-        refi[j][1].to_zero()
-        refi[j][2] = 0
+            refi[j][0].to_zero()
+            refi[j][1].to_zero()
+            refi[j][2] = 0
         
         assign = [[] for i in range(numref)]
         #begin MPI section
@@ -316,16 +324,18 @@ def mref_ali2d_gpu(
             shift_x =  sx_neg*c_ang - sy_neg*s_ang
             shift_y =  sx_neg*s_ang + sy_neg*c_ang
             mn = gpu_aln_param[k].mirror
-            iref = gpu_aln_param[k].ref_id
+            iref = int(gpu_aln_param[k].ref_id)
             # this happens in ali2d_single_iter()
-            set_params2D( img, [angle, shift_x, shift_y, mn, 1.0], "xform.align2d" )
+            set_params2D( img, [angle, shift_x, shift_y, int(mn), 1.0], "xform.align2d" )
             img.set_attr('assign',iref)
             #apply current parameters and add to the average
             temp = rot_shift2D(img,angle,shift_x,shift_y,mn)
             it = k%2
-            util.add_img(refi[iref][it],temp)
-            assign[iref].append(list_of_particles(k))
+            Util.add_img(refi[iref][it],temp)
+            assign[iref].append(list_of_particles[k])
             refi[iref][2] += 1.0
+        
+        
         
         for j in range(numref):
             reduce_EMData_to_root(refi[j][0],myid,main_node,comm = mpi_comm)
@@ -356,7 +366,7 @@ def mref_ali2d_gpu(
                     #ERROR("One of the references vanished","mref_ali2d_MPI",1)
                     #  if vanished, put a random image (only from main node!) there
                     assign[j] = []
-                    assign[j].append( randint(0,nima) )
+                    assign[j].append(randint(0,nima-1) )
                     refi[j][0] = data[assign[j][0]].copy()
                     #print 'ERROR', j
                 else:
@@ -400,10 +410,10 @@ def mref_ali2d_gpu(
             for j in range(numref):
                 msg = "   group #%3d   number of particles = %7d\n"%(j, refi[j][2])
                 print_msg(msg)
-        Iter  = bcast_number_to_all(Iter, main_node) # need to tell all
+        Iter  = bcast_number_to_all(Iter, main_node, mpi_comm) # need to tell all
         if again:
             for j in range(numref):
-                bcast_EMData_to_all(refi[j][0], myid, main_node)
+                bcast_EMData_to_all(refi[j][0], myid, main_node, mpi_comm)
     
     # clean up 
     del assign
@@ -414,18 +424,23 @@ def mref_ali2d_gpu(
     par_str = ['xform.align2d', 'assign', 'ID']
     if myid == main_node:
         from sp_utilities import file_type
-        if(file_type(stack) == "bdb"):
+        if(file_type(filename) == "bdb"):
             from sp_utilities import recv_attr_dict_bdb
-            recv_attr_dict_bdb(main_node, stack, data, par_str, image_start, image_end, number_of_proc)
+            recv_attr_dict_bdb(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
         else:
             from sp_utilities import recv_attr_dict
-            recv_attr_dict(main_node, stack, data, par_str, image_start, image_end, number_of_proc)
+            recv_attr_dict(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
     else:           send_attr_dict(main_node, data, par_str, image_start, image_end)
+        
+    # free gpu resources
+    cu_module.gpu_clear()
+    mpi.mpi_barrier(mpi_comm)
+    
     if myid == main_node:
-        print_end_msg("mref_ali2d_MPI")
-	
+        print_end_msg("mref_ali2d_GPU")
 
-	
+
+
 
 
 
@@ -938,7 +953,13 @@ def mref_ali2d(stack, refim, outdir, maskfile=None, ir=1, ou=-1, rs=1, xrng=0, y
     write_headers(stack, data, list(range(nima)))        
     print_end_msg("mref_ali2d")
 
-
+def mpi_assert( condition, msg ):
+    if not condition:
+        mpi_rank = mpi.mpi_comm_rank(mpi.MPI_COMM_WORLD)
+        print( "MPI PROC["+str(mpi_rank)+"] ASSERTION ERROR:", msg, file=sys.stderr)
+        sys.stderr.flush()
+        mpi.mpi_finalize()
+        sys.exit()
 
 def main():
     arglist = []
@@ -1183,6 +1204,7 @@ def main():
                 if myid==0: print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "main() :: Executing pre-alignment" )
 
                 params2d = mref_ali2d_gpu(
+                    args[0],                          #filename
                     original_images,                  # downsampled images handled by this process only
                     args[1],                        #ref img stack
                     outdir,                         # output directory

@@ -199,8 +199,69 @@ def mref_ali2d_gpu(
 		ref_data = [mask, center, None, None]
 		a0 = -1.0
 
+	recvcount = []
+    disp = []
+    for i in range(number_of_proc):
+        ib, ie = MPI_start_end(total_nima, number_of_proc, i)
+        recvcount.append(ie-ib)
+        if i == 0:
+            disp.append(0)
+        else:
+            disp.append(disp[i-1]+recvcount[i-1])
 
-    
+
+	again = True
+	total_iter = 0
+
+	#----------------------------------[ gpu setup ]
+
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: MPI proc["+str(myid)+"] run pre-alignment GPU setup" )
+
+    # alignment parameters
+    aln_cfg = AlignConfig(
+        len(data), numref,                # no. of images & averages
+        data[0].get_xsize(),         # image size (images are always assumed to be square)
+        numr[-3], 256,               # polar sampling params (no. of rings, no. of sample on ring)
+        step[0], xrng[0], xrng[0])   # shift params (step size & shift range in x/y dim)
+    aln_cfg.freeze()
+
+    # find largest batch size we can fit on the given card
+    gpu_batch_limit = 0
+
+    for split in [ 2**i for i in range(int(math.log(len(data),2))+1) ][::-1]:
+        aln_cfg.sbj_num = min( gpu_batch_limit + split, len(data) )
+        if cu_module.pre_align_size_check( ctypes.c_uint(len(data)), ctypes.byref(aln_cfg), ctypes.c_uint(myid), ctypes.c_float(cuda_device_occ), ctypes.c_bool(False) ) == True:
+            gpu_batch_limit += split
+
+    gpu_batch_limit = aln_cfg.sbj_num
+
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: GPU["+str(myid)+"] pre-alignment batch size: %d/%d" % (gpu_batch_limit, len(data)) )
+
+    # initialize gpu resources (returns location for our alignment parameters in CUDA unified memory)
+    gpu_aln_param = cu_module.pre_align_init( ctypes.c_uint(len(data)), ctypes.byref(aln_cfg), ctypes.c_uint(myid) )
+    gpu_aln_param = ctypes.cast( gpu_aln_param, aln_param_ptr ) # cast to allow Python-side r/w access
+
+    gpu_batch_count = len(data)/gpu_batch_limit if len(data)%gpu_batch_limit==0 else len(data)//gpu_batch_limit+1
+
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: GPU["+str(myid)+"] batch count:", gpu_batch_count )
+
+    # if the local stack fits on the gpu we only fetch the img data once before we loop
+    if( gpu_batch_count == 1 ):
+        cu_module.pre_align_fetch(
+            get_c_ptr_array(data),
+            ctypes.c_uint(len(data)), 
+            ctypes.c_char_p("sbj_batch") )
+
+    #----------------------------------[ alignment ]
+
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: MPI proc["+str(myid)+"] start alignment iterations" )
+
+    N_step = 0
+    # set gpu search parameters
+    cu_module.reset_shifts( ctypes.c_float(xrng[N_step]), ctypes.c_float(step[N_step]) )
+
+
+	
 
 
 

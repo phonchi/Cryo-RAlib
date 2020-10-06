@@ -272,7 +272,7 @@ extern "C" bool pre_align_size_check(
     size_t shift_num = (2*(cfg->shift_rng_x/cfg->shift_step)+1) * (2*(cfg->shift_rng_y/cfg->shift_step)+1);
 
     size_t stack_table_size = ((cfg->ring_len+2) * cfg->sbj_num * shift_num*2 * sizeof(float)) / (1024*1024);
-    stack_table_size *= 1; // only one global avg used as reference in the pre-alignment
+    stack_table_size *= cfg->ref_num; // only one global avg used as reference in the pre-alignment
     if(verbose) printf( "  ccf table mem:  %zuMB\n", stack_table_size );
 
     size_t data_arrays = (cfg->sbj_num*sizeof(int) + cfg->sbj_num*2*sizeof(float)) / (1024*1024);
@@ -282,7 +282,7 @@ extern "C" bool pre_align_size_check(
     ///////////////////////////////////
     // check for early abort (estimated size is too large already)
     size_t cufft_estimate_ccf, cufft_estimate_sbj;
-    CUFFT_ERR_CHK( cufftEstimate1d(cfg->ring_len, CUFFT_C2R, cfg->sbj_num*1*shift_num*2, &cufft_estimate_ccf) );
+    CUFFT_ERR_CHK( cufftEstimate1d(cfg->ring_len, CUFFT_C2R, cfg->sbj_num*cfg->ref_num*shift_num*2, &cufft_estimate_ccf) );
     CUFFT_ERR_CHK( cufftEstimate1d(cfg->ring_len, CUFFT_R2C, cfg->ring_num*cfg->sbj_num, &cufft_estimate_sbj) );
     cufft_estimate_ccf /= 1024*1024;
     cufft_estimate_sbj /= 1024*1024;
@@ -298,7 +298,7 @@ extern "C" bool pre_align_size_check(
 
     cufftHandle cufft_pln;
     size_t cufft_workspace_size_ccf;
-    CUFFT_ERR_CHK( cufftPlan1d(&cufft_pln, cfg->ring_len, CUFFT_C2R, cfg->sbj_num*1*shift_num*2) ); // cfg->ref_num==1 for ref free alignment
+    CUFFT_ERR_CHK( cufftPlan1d(&cufft_pln, cfg->ring_len, CUFFT_C2R, cfg->sbj_num*cfg->ref_num*shift_num*2) ); // cfg->ref_num==1 for ref free alignment
     CUFFT_ERR_CHK( cufftGetSize(cufft_pln, &cufft_workspace_size_ccf) );
     CUFFT_ERR_CHK( cufftDestroy(cufft_pln) );
     cufft_workspace_size_ccf /= 1024*1024;

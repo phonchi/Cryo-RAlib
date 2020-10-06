@@ -261,11 +261,80 @@ def mref_ali2d_gpu(
     # set gpu search parameters
     cu_module.reset_shifts( ctypes.c_float(xrng[N_step]), ctypes.c_float(step[N_step]) )
 
-	
+	# if the local stack fits on the gpu we only fetch the feference img data once before we loop
+    if( gpu_batch_count == 1 ):
+        cu_module.pre_align_fetch(
+            get_c_ptr_array([tmp[0] for tmp in refi]),
+            ctypes.c_uint(numref), 
+            ctypes.c_char_p("ref_batch") )
+    
+    
     for Iter in range(max_iter):
         total_iter += 1
+        ringref = []
+        mashi = cnx-last_ring-2
+  
+  
+        
+        # determine next gpu batch and shove to the gpu (NOTE: if we
+        # only have a single batch, this already happened earlier)
+        if( gpu_batch_count > 1 ):
+    
+            gpu_batch_start = gpu_batch_idx * gpu_batch_limit
+            gpu_batch_end   = gpu_batch_start + gpu_batch_limit
+            if gpu_batch_end > len(data): gpu_batch_end = len(data)
+    
+            cu_module.pre_align_fetch(
+                get_c_ptr_array( data[gpu_batch_start:gpu_batch_end] ),
+                ctypes.c_int( gpu_batch_end-gpu_batch_start ),
+                ctypes.c_char_p("sbj_batch") )
+        else:
+            gpu_batch_start = 0
+            gpu_batch_end   = len(data)
 
-		#----------------------------------[ construct new average]
+        # run the alignment on gpu
+        cu_module.pre_align_run( ctypes.c_int(gpu_batch_start), ctypes.c_int(gpu_batch_end) )
+    
+        # print progress bar
+        gpu_calls_ttl = 1 * max_iter * gpu_batch_count
+        #gpu_calls_ttl = len(xrng) * max_iter * gpu_batch_count - 1
+        gpu_calls_cnt = N_step*max_iter*gpu_batch_count + Iter*gpu_batch_count + gpu_batch_idx
+        gpu_calls_prc = int( float(gpu_calls_cnt+1)/gpu_calls_ttl * 50.0 )
+        sys.stdout.write( "\r[PRE-ALIGN][GPU"+str(myid)+"][" + "="*gpu_calls_prc + "-"*(50-gpu_calls_prc) + "]~[%d/%d]~[%.2f%%]" % (gpu_calls_cnt+1, gpu_calls_ttl, (float(gpu_calls_cnt+1)/gpu_calls_ttl)*100.0) )
+        sys.stdout.flush()
+        if gpu_calls_cnt+1 == gpu_calls_ttl: print("")
+        
+            
+        # convert alignment parameters to the format expected by
+        # other sphire functions and update EMData headers
+        # sx_sum, sy_sum = 0.0, 0.0 
+        for k, img in enumerate(data):
+            # this is usually done in ormq()
+            angle   =  gpu_aln_param[k].angle
+            sx_neg  = -gpu_aln_param[k].shift_x
+            sy_neg  = -gpu_aln_param[k].shift_y
+            c_ang   =  math.cos( math.radians(angle) )
+            s_ang   = -math.sin( math.radians(angle) )
+            shift_x =  sx_neg*c_ang - sy_neg*s_ang
+            shift_y =  sx_neg*s_ang + sy_neg*c_ang
+            # this happens in ali2d_single_iter()
+            util.set_params2D( img, [angle, shift_x, shift_y, gpu_aln_param[k].mirror, 1.0], "xform.align2d" )
+            # this is what is returned by ali2d_single_iter()
+            if gpu_aln_param[k].mirror==0:
+                sx_sum += shift_x
+            else:
+                sx_sum -= shift_x
+            sy_sum += shift_y
+        
+        sx_sum = mpi.mpi_reduce( sx_sum, 1, mpi.MPI_FLOAT, mpi.MPI_SUM, main_node, mpi_comm )
+        sy_sum = mpi.mpi_reduce( sy_sum, 1, mpi.MPI_FLOAT, mpi.MPI_SUM, main_node, mpi_comm )
+        #"""
+        
+        
+
+
+
+	
 
 	
 

@@ -200,20 +200,10 @@ def mref_ali2d_gpu(
         ref_data = [mask, center, None, None]
         a0 = -1.0
 
-    recvcount = []
-    disp = []
-    for i in range(number_of_proc):
-        ib, ie = MPI_start_end(total_nima, number_of_proc, i)
-        recvcount.append(ie-ib)
-        if i == 0:
-            disp.append(0)
-        else:
-            disp.append(disp[i-1]+recvcount[i-1])
-
-
     again = True
-    total_iter = 0
-
+    Iter = 0
+    ref_data = [mask, center, None, None]
+    
 	#----------------------------------[ gpu setup ]
 
     print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: MPI proc["+str(myid)+"] run pre-alignment GPU setup" )
@@ -246,13 +236,13 @@ def mref_ali2d_gpu(
 
     print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: GPU["+str(myid)+"] batch count:", gpu_batch_count )
 
-    # if the local stack fits on the gpu we only fetch the img data once before we loop
+    # if the local stack fits on the gpu we only fetch the img data and the reference data once before we loop
     if( gpu_batch_count == 1 ):
         cu_module.pre_align_fetch(
             get_c_ptr_array(data),
             ctypes.c_uint(len(data)), 
             ctypes.c_char_p("sbj_batch") )
-
+            
     #----------------------------------[ alignment ]
 
     print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: MPI proc["+str(myid)+"] start alignment iterations" )
@@ -260,54 +250,62 @@ def mref_ali2d_gpu(
     N_step = 0
     # set gpu search parameters
     cu_module.reset_shifts( ctypes.c_float(xrng[N_step]), ctypes.c_float(step[N_step]) )
-
-	# if the local stack fits on the gpu we only fetch the feference img data once before we loop
-    if( gpu_batch_count == 1 ):
-        cu_module.pre_align_fetch(
-            get_c_ptr_array([tmp[0] for tmp in refi]),
-            ctypes.c_uint(numref), 
-            ctypes.c_char_p("ref_batch") )
-    
-    
-    for Iter in range(max_iter):
-        total_iter += 1
-        ringref = []
-        mashi = cnx-last_ring-2
-  
-  
         
-        # determine next gpu batch and shove to the gpu (NOTE: if we
-        # only have a single batch, this already happened earlier)
-        if( gpu_batch_count > 1 ):
+    cu_module.pre_align_fetch(
+        get_c_ptr_array([tmp[0] for tmp in refi]),
+        ctypes.c_uint(numref), 
+        ctypes.c_char_p("ref_batch"))
     
-            gpu_batch_start = gpu_batch_idx * gpu_batch_limit
-            gpu_batch_end   = gpu_batch_start + gpu_batch_limit
-            if gpu_batch_end > len(data): gpu_batch_end = len(data)
-    
-            cu_module.pre_align_fetch(
-                get_c_ptr_array( data[gpu_batch_start:gpu_batch_end] ),
-                ctypes.c_int( gpu_batch_end-gpu_batch_start ),
-                ctypes.c_char_p("sbj_batch") )
-        else:
-            gpu_batch_start = 0
-            gpu_batch_end   = len(data)
-
-        # run the alignment on gpu
-        cu_module.pre_align_run( ctypes.c_int(gpu_batch_start), ctypes.c_int(gpu_batch_end) )
-    
-        # print progress bar
-        gpu_calls_ttl = 1 * max_iter * gpu_batch_count
-        #gpu_calls_ttl = len(xrng) * max_iter * gpu_batch_count - 1
-        gpu_calls_cnt = N_step*max_iter*gpu_batch_count + Iter*gpu_batch_count + gpu_batch_idx
-        gpu_calls_prc = int( float(gpu_calls_cnt+1)/gpu_calls_ttl * 50.0 )
-        sys.stdout.write( "\r[PRE-ALIGN][GPU"+str(myid)+"][" + "="*gpu_calls_prc + "-"*(50-gpu_calls_prc) + "]~[%d/%d]~[%.2f%%]" % (gpu_calls_cnt+1, gpu_calls_ttl, (float(gpu_calls_cnt+1)/gpu_calls_ttl)*100.0) )
-        sys.stdout.flush()
-        if gpu_calls_cnt+1 == gpu_calls_ttl: print("")
+    while Iter < max_iter and again:
         
+        # backup last iteration's alignment parameters
+        old_ali_params = []
+        for im in range(nima):  
+            alpha, sx, sy, mirror, scale = util.get_params2D(data[im])
+            old_ali_params.extend([alpha, sx, sy, mirror])
             
-        # convert alignment parameters to the format expected by
-        # other sphire functions and update EMData headers
-        # sx_sum, sy_sum = 0.0, 0.0 
+        ############################################GPU
+        #
+        # FOR gpu_batch_i DO ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ >
+        for gpu_batch_idx in range(gpu_batch_count):
+        
+            # determine next gpu batch and shove to the gpu (NOTE: if we
+            # only have a single batch, this already happened earlier)
+            if( gpu_batch_count > 1 ):
+        
+                gpu_batch_start = gpu_batch_idx * gpu_batch_limit
+                gpu_batch_end   = gpu_batch_start + gpu_batch_limit
+                if gpu_batch_end > len(data): gpu_batch_end = len(data)
+        
+                cu_module.pre_align_fetch(
+                    get_c_ptr_array( data[gpu_batch_start:gpu_batch_end] ),
+                    ctypes.c_int( gpu_batch_end-gpu_batch_start ),
+                    ctypes.c_char_p("sbj_batch") )
+            else:
+                gpu_batch_start = 0
+                gpu_batch_end   = len(data)
+                
+            # run the alignment on gpu
+            cu_module.mref_align_run( ctypes.c_int(gpu_batch_start), ctypes.c_int(gpu_batch_end))
+            
+            # print progress bar
+            gpu_calls_ttl = 1 * max_iter * gpu_batch_count
+            #gpu_calls_ttl = len(xrng) * max_iter * gpu_batch_count - 1
+            gpu_calls_cnt = N_step*max_iter*gpu_batch_count + Iter*gpu_batch_count + gpu_batch_idx
+            gpu_calls_prc = int( float(gpu_calls_cnt+1)/gpu_calls_ttl * 50.0 )
+            sys.stdout.write( "\r[MREF-ALIGN][GPU"+str(myid)+"][" + "="*gpu_calls_prc + "-"*(50-gpu_calls_prc) + "]~[%d/%d]~[%.2f%%]" % (gpu_calls_cnt+1, gpu_calls_ttl, (float(gpu_calls_cnt+1)/gpu_calls_ttl)*100.0) )
+            sys.stdout.flush()
+            if gpu_calls_cnt+1 == gpu_calls_ttl: print("")
+        
+        # < ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FOR gpu_batch_i DO
+        #set reference image to zero
+        for j in range(numref):
+        refi[j][0].to_zero()
+        refi[j][1].to_zero()
+        refi[j][2] = 0
+        
+        assign = [[] for i in range(numref)]
+        #begin MPI section
         for k, img in enumerate(data):
             # this is usually done in ormq()
             angle   =  gpu_aln_param[k].angle
@@ -317,23 +315,114 @@ def mref_ali2d_gpu(
             s_ang   = -math.sin( math.radians(angle) )
             shift_x =  sx_neg*c_ang - sy_neg*s_ang
             shift_y =  sx_neg*s_ang + sy_neg*c_ang
+            mn = gpu_aln_param[k].mirror
+            iref = gpu_aln_param[k].ref_id
             # this happens in ali2d_single_iter()
-            util.set_params2D( img, [angle, shift_x, shift_y, gpu_aln_param[k].mirror, 1.0], "xform.align2d" )
-            # this is what is returned by ali2d_single_iter()
-            if gpu_aln_param[k].mirror==0:
-                sx_sum += shift_x
+            set_params2D( img, [angle, shift_x, shift_y, mn, 1.0], "xform.align2d" )
+            img.set_attr('assign',iref)
+            #apply current parameters and add to the average
+            temp = rot_shift2D(img,angle,shift_x,shift_y,mn)
+            it = k%2
+            util.add_img(refi[iref][it],temp)
+            assign[iref].append(list_of_particles(k))
+            refi[iref][2] += 1.0
+        
+        for j in range(numref):
+            reduce_EMData_to_root(refi[j][0],myid,main_node,comm = mpi_comm)
+            reduce_EMData_to_root(refi[j][1],myid,main_node,comm = mpi_comm)
+            refi[j][2] = mpi_reduce(refi[j][2], 1, MPI_FLOAT, MPI_SUM, main_node, mpi_comm)
+            if(myid == main_node): refi[j][2] = int(refi[j][2][0])
+        #gather assignments
+        for j in range(numref):
+            if myid == main_node:
+                for n in range(number_of_proc):
+                    if n != main_node:
+                        import sp_global_def
+                        ln =  mpi_recv(1, MPI_INT, n, sp_global_def.SPARX_MPI_TAG_UNIVERSAL, mpi_comm)
+                        lis = mpi_recv(ln[0], MPI_INT, n, sp_global_def.SPARX_MPI_TAG_UNIVERSAL, mpi_comm)
+                        for l in range(ln[0]): assign[j].append(int(lis[l]))
             else:
-                sx_sum -= shift_x
-            sy_sum += shift_y
+                import sp_global_def
+                mpi_send(len(assign[j]), 1, MPI_INT, main_node, sp_global_def.SPARX_MPI_TAG_UNIVERSAL, mpi_comm)
+                mpi_send(assign[j], len(assign[j]), MPI_INT, main_node, sp_global_def.SPARX_MPI_TAG_UNIVERSAL, mpi_comm)
         
-        sx_sum = mpi.mpi_reduce( sx_sum, 1, mpi.MPI_FLOAT, mpi.MPI_SUM, main_node, mpi_comm )
-        sy_sum = mpi.mpi_reduce( sy_sum, 1, mpi.MPI_FLOAT, mpi.MPI_SUM, main_node, mpi_comm )
-        #"""
+        if myid == main_node:
+            # replace the name of the stack with reference with the current one
+            refim = os.path.join(outdir,"aqm%03d.hdf"%Iter)
+            a1 = 0.0
+            ave_fsc = []
+            for j in range(numref):
+                if refi[j][2] < 4:
+                    #ERROR("One of the references vanished","mref_ali2d_MPI",1)
+                    #  if vanished, put a random image (only from main node!) there
+                    assign[j] = []
+                    assign[j].append( randint(0,nima) )
+                    refi[j][0] = data[assign[j][0]].copy()
+                    #print 'ERROR', j
+                else:
+                    #frsc = fsc_mask(refi[j][0], refi[j][1], mask, 1.0, os.path.join(outdir,"drm%03d%04d"%(Iter, j)))
+                    from sp_statistics import fsc
+                    frsc = fsc(refi[j][0], refi[j][1], 1.0, os.path.join(outdir,"drm%03d%04d.txt"%(Iter,j)))
+                    Util.add_img( refi[j][0], refi[j][1] )
+                    Util.mul_scalar( refi[j][0], 1.0/float(refi[j][2]) )
+                            
+                    if ave_fsc == []:
+                        for i in range(len(frsc[1])): ave_fsc.append(frsc[1][i])
+                        c_fsc = 1
+                    else:
+                        for i in range(len(frsc[1])): ave_fsc[i] += frsc[1][i]
+                        c_fsc += 1
+                    #print 'OK', j, len(frsc[1]), frsc[1][0:5], ave_fsc[0:5]            
         
+            #print 'sum', sum(ave_fsc)
+            if sum(ave_fsc) != 0:        
+                for i in range(len(ave_fsc)):
+                    ave_fsc[i] /= float(c_fsc)
+                    frsc[1][i]  = ave_fsc[i]
+            
+            for j in range(numref):
+                ref_data[2]    = refi[j][0]
+                ref_data[3]    = frsc
+                refi[j][0], cs = user_func(ref_data)    
         
-
-
-
+                # write the current average
+                TMP = []
+                for i_tmp in range(len(assign[j])): TMP.append(float(assign[j][i_tmp]))
+                TMP.sort()
+                refi[j][0].set_attr_dict({'ave_n': refi[j][2],  'members': TMP })
+                del TMP
+                refi[j][0].process_inplace("normalize.mask", {"mask":mask, "no_sigma":1})
+                refi[j][0].write_image(refim, j)
+                
+            Iter += 1
+            msg = "ITERATION #%3d        %d\n\n"%(Iter,again)
+            print_msg(msg)
+            for j in range(numref):
+                msg = "   group #%3d   number of particles = %7d\n"%(j, refi[j][2])
+                print_msg(msg)
+        Iter  = bcast_number_to_all(Iter, main_node) # need to tell all
+        if again:
+            for j in range(numref):
+                bcast_EMData_to_all(refi[j][0], myid, main_node)
+    
+    # clean up 
+    del assign
+    # write out headers  and STOP, under MPI writing has to be done sequentially (time-consumming)
+    mpi_barrier(mpi_comm)
+    if CTF and data_had_ctf == 0:
+        for im in range(nima): data[im].set_attr('ctf_applied', 0)
+    par_str = ['xform.align2d', 'assign', 'ID']
+    if myid == main_node:
+        from sp_utilities import file_type
+        if(file_type(stack) == "bdb"):
+            from sp_utilities import recv_attr_dict_bdb
+            recv_attr_dict_bdb(main_node, stack, data, par_str, image_start, image_end, number_of_proc)
+        else:
+            from sp_utilities import recv_attr_dict
+            recv_attr_dict(main_node, stack, data, par_str, image_start, image_end, number_of_proc)
+    else:           send_attr_dict(main_node, data, par_str, image_start, image_end)
+    if myid == main_node:
+        print_end_msg("mref_ali2d_MPI")
 	
 
 	
@@ -607,7 +696,7 @@ def mref_ali2d_MPI(stack, refim, outdir, maskfile = None, ir=1, ou=-1, rs=1, xrn
             recv_attr_dict(main_node, stack, data, par_str, image_start, image_end, number_of_proc)
     else:           send_attr_dict(main_node, data, par_str, image_start, image_end)
     if myid == main_node:
-        print_end_msg("mref_ali2d_MPI")
+        print_end_msg("mref_ali2d_GPU")
 
 def mref_ali2d(stack, refim, outdir, maskfile=None, ir=1, ou=-1, rs=1, xrng=0, yrng=0, step=1, center=1, maxit=0, CTF=False, snr=1.0, user_func_name="ref_ali2d", rand_seed=1000, MPI=False):
     """

@@ -15,6 +15,7 @@ import math
 import numpy as np
 import ctypes
 from EMAN2 import EMNumPy
+from cupy.cuda.nvtx import RangePush, RangePushC, RangePop
 
 CUDA_PATH = os.path.join(os.path.dirname(__file__),  "cuda", "")
 cu_module = ctypes.CDLL( CUDA_PATH + "gpu_aln_pack.so" )
@@ -129,12 +130,12 @@ def mref_ali2d_gpu(
     max_iter   = int(maxit)
 
     if max_iter ==0:
-    	max_iter = 10
-    	auto_stop = True
+        max_iter = 10
+        auto_stop = True
     else:
-    	auto_stop = False
+        auto_stop = False
 
-	# determine global index values of particles handled by this process
+    # determine global index values of particles handled by this process
     data = stack
     total_nima = len(data)
     total_nima = mpi.mpi_reduce(total_nima, 1, mpi.MPI_INT, mpi.MPI_SUM, 0, mpi_comm)
@@ -181,38 +182,40 @@ def mref_ali2d_gpu(
     # image center
     cny = cnx = nx/2+1
     mode = "F"
-
+    RangePush("Preprocess data")
     # prepare reference images on all nodes
-    ima = data[0]
+    ima = data[0].copy()
     ima.to_zero()
     for j in range(numref):
         #  even, odd, numer of even, number of images.  After frc, totav
         refi.append([get_im(refim,j), ima.copy(), 0])
+        refi[j][0].process_inplace("normalize.mask", {"mask":mask, "no_sigma":1}) # normalize reference images to N(0,1)
 
-	# create/reset alignment parameters
+    # create/reset alignment parameters
     for im in range(nima):
-        data[im].set_attr( 'ID', list_of_particles[im] )
+        #data[im].set_attr( 'ID', list_of_particles[im] )
         util.set_params2D( data[im], [0.0, 0.0, 0.0, 0, 1.0], 'xform.align2d' )
-        st = Util.infomask( data[im], mask, False )
-        data[im] -= st[0]
+        data[im].process_inplace("normalize.mask", {"mask":mask, "no_sigma":0}) # subtract average under the mask
+        #data[im] -= st[0]
         if phase_flip:
             data[im] = filt_ctf(data[im], data[im].get_attr("ctf"), binary = True)
 
     # precalculate rings & weights
     numr = alignment.Numrinit( first_ring, last_ring, rstep, mode )
     wr   = alignment.ringwe( numr, mode )
-
+    RangePop()
     if myid == main_node:  
         seed(rand_seed)
         a0 = -1.0
+        ref_data = [mask, center, None, None]
 
     again = True
     Iter = 0
-    ref_data = [mask, center, None, None]
     
-	#----------------------------------[ gpu setup ]
+    
+    #----------------------------------[ gpu setup ]
 
-    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: MPI proc["+str(myid)+"] run pre-alignment GPU setup" )
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: MPI proc["+str(myid)+"] run pre-alignment GPU setup" )
 
     # alignment parameters
     aln_cfg = AlignConfig(
@@ -224,15 +227,16 @@ def mref_ali2d_gpu(
 
     # find largest batch size we can fit on the given card
     gpu_batch_limit = 0
-
+    RangePush("Determine batch size")
     for split in [ 2**i for i in range(int(math.log(len(data),2))+1) ][::-1]:
         aln_cfg.sbj_num = min( gpu_batch_limit + split, len(data) )
         if cu_module.pre_align_size_check( ctypes.c_uint(len(data)), ctypes.byref(aln_cfg), ctypes.c_uint(myid), ctypes.c_float(cuda_device_occ), ctypes.c_bool(False) ) == True:
             gpu_batch_limit += split
 
     gpu_batch_limit = aln_cfg.sbj_num
-
-    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: GPU["+str(myid)+"] pre-alignment batch size: %d/%d" % (gpu_batch_limit, len(data)) )
+    RangePop()
+    
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: GPU["+str(myid)+"] pre-alignment batch size: %d/%d" % (gpu_batch_limit, len(data)) )
 
     # initialize gpu resources (returns location for our alignment parameters in CUDA unified memory)
     gpu_aln_param = cu_module.pre_align_init( ctypes.c_uint(len(data)), ctypes.byref(aln_cfg), ctypes.c_uint(myid) )
@@ -240,7 +244,7 @@ def mref_ali2d_gpu(
 
     gpu_batch_count = len(data)/gpu_batch_limit if len(data)%gpu_batch_limit==0 else len(data)//gpu_batch_limit+1
 
-    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: GPU["+str(myid)+"] batch count:", gpu_batch_count )
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: GPU["+str(myid)+"] batch count:", gpu_batch_count )
 
     # if the local stack fits on the gpu we only fetch the img data and the reference data once before we loop
     if( gpu_batch_count == 1 ):
@@ -251,7 +255,7 @@ def mref_ali2d_gpu(
             
     #----------------------------------[ alignment ]
 
-    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "ali2d_base_gpu_isac_CLEAN() :: MPI proc["+str(myid)+"] start alignment iterations" )
+    print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: MPI proc["+str(myid)+"] start alignment iterations" )
 
     N_step = 0
     # set gpu search parameters
@@ -263,18 +267,21 @@ def mref_ali2d_gpu(
         
         cu_module.pre_align_fetch(
             get_c_ptr_array([tmp[0] for tmp in refi]),
-            ctypes.c_uint(numref), 
+            ctypes.c_int(numref), 
             ctypes.c_char_p("ref_batch"))
         
         # backup last iteration's alignment parameters
+        RangePush("Iteration's alignment parameters")
         old_ali_params = []
         for im in range(nima):  
             alpha, sx, sy, mirror, scale = util.get_params2D(data[im])
             old_ali_params.extend([alpha, sx, sy, mirror])
-            
+        RangePop()  
+        
         ############################################GPU
         #
         # FOR gpu_batch_i DO ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ >
+        RangePush("run the alignment on gpu")
         for gpu_batch_idx in range(gpu_batch_count):
         
             # determine next gpu batch and shove to the gpu (NOTE: if we
@@ -301,17 +308,20 @@ def mref_ali2d_gpu(
             #gpu_calls_ttl = len(xrng) * max_iter * gpu_batch_count - 1
             gpu_calls_cnt = N_step*max_iter*gpu_batch_count + Iter*gpu_batch_count + gpu_batch_idx
             gpu_calls_prc = int( float(gpu_calls_cnt+1)/gpu_calls_ttl * 50.0 )
-            sys.stdout.write( "\r[MREF-ALIGN][GPU"+str(myid)+"][" + "="*gpu_calls_prc + "-"*(50-gpu_calls_prc) + "]~[%d/%d]~[%.2f%%]" % (gpu_calls_cnt+1, gpu_calls_ttl, (float(gpu_calls_cnt+1)/gpu_calls_ttl)*100.0) )
+            sys.stdout.write( "\r[MREF-ALIGN][GPU"+str(myid)+"][" + "="*gpu_calls_prc + "-"*(50-gpu_calls_prc) + "]~[%d/%d]~[%.2f%%]\n" % (gpu_calls_cnt+1, gpu_calls_ttl, (float(gpu_calls_cnt+1)/gpu_calls_ttl)*100.0) )
             sys.stdout.flush()
             if gpu_calls_cnt+1 == gpu_calls_ttl: print("")
-        
+        RangePop() 
         # < ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FOR gpu_batch_i DO
         #set reference image to zero
+        RangePush("reference image to zero")
         for j in range(numref):
             refi[j][0].to_zero()
             refi[j][1].to_zero()
             refi[j][2] = 0
+        RangePop()
         
+        RangePush("transfer angle and average")
         assign = [[] for i in range(numref)]
         #begin MPI section
         for k, img in enumerate(data):
@@ -334,14 +344,19 @@ def mref_ali2d_gpu(
             Util.add_img(refi[iref][it],temp)
             assign[iref].append(list_of_particles[k])
             refi[iref][2] += 1.0
-        
-        
-        
+            #print("Assign to %d reference for image %d"%(iref,list_of_particles[k]))
+        RangePop()
+            
+            
+        RangePush("average")
         for j in range(numref):
             reduce_EMData_to_root(refi[j][0],myid,main_node,comm = mpi_comm)
             reduce_EMData_to_root(refi[j][1],myid,main_node,comm = mpi_comm)
             refi[j][2] = mpi_reduce(refi[j][2], 1, MPI_FLOAT, MPI_SUM, main_node, mpi_comm)
-            if(myid == main_node): refi[j][2] = int(refi[j][2][0])
+            if(myid == main_node): refi[j][2] = int(refi[j][2][0])          
+        RangePop()
+        
+        RangePush("set param")
         #gather assignments
         for j in range(numref):
             if myid == main_node:
@@ -366,9 +381,9 @@ def mref_ali2d_gpu(
                     #ERROR("One of the references vanished","mref_ali2d_MPI",1)
                     #  if vanished, put a random image (only from main node!) there
                     assign[j] = []
-                    assign[j].append(randint(0,nima-1) )
+                    assign[j].append(randint(0,nima-1))
                     refi[j][0] = data[assign[j][0]].copy()
-                    #print 'ERROR', j
+
                 else:
                     #frsc = fsc_mask(refi[j][0], refi[j][1], mask, 1.0, os.path.join(outdir,"drm%03d%04d"%(Iter, j)))
                     from sp_statistics import fsc
@@ -393,8 +408,9 @@ def mref_ali2d_gpu(
             for j in range(numref):
                 ref_data[2]    = refi[j][0]
                 ref_data[3]    = frsc
+                
                 refi[j][0], cs = user_func(ref_data)    
-        
+                
                 # write the current average
                 TMP = []
                 for i_tmp in range(len(assign[j])): TMP.append(float(assign[j][i_tmp]))
@@ -414,9 +430,10 @@ def mref_ali2d_gpu(
         if again:
             for j in range(numref):
                 bcast_EMData_to_all(refi[j][0], myid, main_node, mpi_comm)
-    
+        RangePop()
     # clean up 
     del assign
+    RangePush("disk")
     # write out headers  and STOP, under MPI writing has to be done sequentially (time-consumming)
     mpi_barrier(mpi_comm)
     if CTF and data_had_ctf == 0:
@@ -435,6 +452,7 @@ def mref_ali2d_gpu(
     # free gpu resources
     cu_module.gpu_clear()
     mpi.mpi_barrier(mpi_comm)
+    RangePop()
     
     if myid == main_node:
         print_end_msg("mref_ali2d_GPU")
@@ -662,7 +680,7 @@ def mref_ali2d_MPI(stack, refim, outdir, maskfile = None, ir=1, ou=-1, rs=1, xrn
                         c_fsc += 1
                     #print 'OK', j, len(frsc[1]), frsc[1][0:5], ave_fsc[0:5]            
         
-        
+            
             #print 'sum', sum(ave_fsc)
             if sum(ave_fsc) != 0:        
                 for i in range(len(ave_fsc)):
@@ -1151,7 +1169,8 @@ def main():
                 # read batch
                 for i, img_idx in enumerate( range(batch_start, batch_end) ):
                     tmp_img.read_image( args[0], img_idx )
-                    original_images[idx+i] = tmp_img
+                    original_images[idx+i] = tmp_img.copy()
+#                 original_images = EMData.read_images(args[0], list(range(batch_start, batch_end)))
                 # go to next batch
                 batch_start += batch_img_num
                 idx += batch_img_num
@@ -1228,9 +1247,9 @@ def main():
                     mpi_gpu_proc=(Blockdata["myid_on_node"] in GPU_DEVICES),
                     cuda_device_occ=0.9 )
 
-                mpi.mpi_barrier( MPI_GPU_COMM)
+                mpi.mpi_barrier(MPI_GPU_COMM)
                 
-                if myid==0: print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "main() :: Pre-alignment call complete" )
+                if myid==0: print(time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "main() :: Pre-alignment call complete" )
 
 
 

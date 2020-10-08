@@ -341,6 +341,16 @@ extern "C" bool pre_align_size_check(
         return false;
 }
 
+void print_data( const float** img_data, const unsigned int img_num, const unsigned int img_dim ){
+    for(int i=0; i<img_num; i++){
+        printf( "img[%d]:\n", i );
+        for( unsigned int j=0; j<img_dim*img_dim; j++ ){
+                printf("%.6f ", img_data[i][j]);
+        }
+        printf("\n");
+    }
+}
+
 extern "C" void pre_align_fetch(
     const float**      img_data,
     const unsigned int img_num,
@@ -349,14 +359,19 @@ extern "C" void pre_align_fetch(
     // select batch to fill    
     BatchHandler* batch_handler = NULL;
     if( strcmp(batch_select, "sbj_batch")==0 ) batch_handler = aln_res.sbj_batch;
-    if( strcmp(batch_select, "ref_batch")==0 ) batch_handler = aln_res.ref_batch;
-    
+    if( strcmp(batch_select, "ref_batch")==0 ){
+        batch_handler = aln_res.ref_batch;
+        //print_data( (const float**)img_data, img_num, aln_res.aln_cfg->img_dim );
+    }
     if( batch_handler == NULL ){
         printf( "ERROR! fetch_data() :: Unknown batch type \'%s\' specified.\n", batch_select );
         return;
     }
 
     // transfer data
+    //printf(batch_select);
+    //printf("\n");
+    //print_data( (const float**)img_data, img_num, aln_res.aln_cfg->img_dim );
     batch_handler->fetch_data( img_data, 0, img_num );
 }
 
@@ -368,7 +383,41 @@ extern "C" void mref_align_run( const int start_idx, const int stop_idx){
     // grab batch handlers
     BatchHandler* ref_batch = aln_res.ref_batch;
     BatchHandler* sbj_batch = aln_res.sbj_batch;
-
+    
+    //unsigned int img_dim = aln_res.aln_cfg->img_dim;
+    //size_t tex_pitch;
+    //float h_tex_data[ img_dim*img_dim ];
+    //
+    //for( unsigned int i=0; i<aln_res.aln_cfg->sbj_num; i++ ){
+    //    float* d_tex_data = aln_res.sbj_batch->get_tex_data( &tex_pitch );
+    //    printf( "img2[%d]:\n", i );
+    //    CUDA_ERR_CHK( cudaMemcpy2D(h_tex_data, img_dim*sizeof(float),
+    //                  &d_tex_data[(tex_pitch/sizeof(float))*img_dim*i], tex_pitch,
+    //                  img_dim*sizeof(float), img_dim,
+    //                  cudaMemcpyDeviceToHost) );
+    //    for( unsigned int j=0; j<img_dim*img_dim; j++ ){
+    //        printf("%.6f ", h_tex_data[j]);
+    //    }
+    //    printf("\n");
+    //}
+    
+    //unsigned int img_dim = aln_res.aln_cfg->img_dim;
+    //size_t tex_pitch;
+    //float h_tex_data[ img_dim*img_dim ];
+    //
+    //for( unsigned int i=0; i<aln_res.aln_cfg->ref_num; i++ ){
+    //    float* d_tex_data = aln_res.ref_batch->get_tex_data( &tex_pitch );
+    //    printf( "img2[%d]:\n", i );
+    //    CUDA_ERR_CHK( cudaMemcpy2D(h_tex_data, img_dim*sizeof(float),
+    //                  &d_tex_data[(tex_pitch/sizeof(float))*img_dim*i], tex_pitch,
+    //                  img_dim*sizeof(float), img_dim,
+    //                  cudaMemcpyDeviceToHost) );
+    //    for( unsigned int j=0; j<img_dim*img_dim; j++ ){
+    //        printf("%.6f ", h_tex_data[j]);
+    //    }
+    //    printf("\n");
+    //}
+    
     // update reference
     ref_batch->resample_to_polar( 0, 0, 0, aln_res.u_polar_sample_coords );
     ref_batch->apply_FFT();
@@ -385,8 +434,14 @@ extern "C" void mref_align_run( const int start_idx, const int stop_idx){
     }
     sbj_batch->apply_IFFT();
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
-
+   
     sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
+    //for ( unsigned int i=start_idx; i < stop_idx; i++ ){
+    //    printf( "shift x is %f", aln_res.u_aln_param[i].shift_x );
+    //    printf( ", shift y is %f", aln_res.u_aln_param[i].shift_y );
+    //    printf( ", angle is %f", aln_res.u_aln_param[i].angle );
+    //    printf( ", id is %d\n", aln_res.u_aln_param[i].ref_id );
+    //}
 }
 
 
@@ -962,6 +1017,7 @@ __global__ void cu_ccf_mult_m(
     unsigned int sbj_idx = bid * blockDim.x*2*ring_num;  // img_index x img_size
 
     float ccf_orig_r=0.0f, ccf_orig_i=0.0f, ccf_mirr_r=0.0f, ccf_mirr_i=0.0f;
+    
     for( unsigned int i=0; i<ring_num; i++ ){
 
         // determine element offsets
@@ -986,6 +1042,7 @@ __global__ void cu_ccf_mult_m(
 
     // write results
     unsigned int table_idx = blockIdx.x*batch_table_row_offset + tid*2;  // select row and elem_offset
+    //printf( "The address of table is %d..\n", table_idx);
     batch_table_row_ptr[ table_idx+0 ] = ccf_orig_r;
     batch_table_row_ptr[ table_idx+1 ] = ccf_orig_i;
     batch_table_row_ptr[ table_idx+batch_table_mirror_offset+0 ] = ccf_mirr_r;
@@ -1436,8 +1493,28 @@ void BatchHandler::ccf_mult_m(
     const unsigned int  shift_idx,
     const unsigned int  data_idx )
 {
+    //printf("reference number %d ", ref_batch->img_num);
+    //for(int i=0; i<img_num; i++){
+    //    printf( "polar_img[%d]:\n", i );
+    //    for( unsigned int j=0; j<(ring_len+2)*ring_num; j++ ){
+    //            printf("%.6f ", d_img_data[i*(ring_len+2)*ring_num+j]);
+    //    }
+    //    printf("\n");
+    //}
+    //
+    //for(int i=0; i<ref_batch->img_num; i++){
+    //    printf( "polar_img_ref[%d]:\n", i );
+    //    for( unsigned int j=0; j<(ref_batch->ring_len+2)*ref_batch->ring_num; j++ ){
+    //            printf("%.6f ", ref_batch->d_img_data[i*(ring_len+2)*ref_batch->ring_num+j]);
+    //    }
+    //    printf("\n");
+    //}
     // invoke cuda kernel to process the ccf multiplications, this will go through all the reference
-	for ( unsigned int j=0; j<ref_batch->img_num; j++ ){
+    //printf( "The image number is %d..\n", img_num);
+    for ( unsigned int j=0; j<ref_batch->img_num; j++ ){
+        //printf( "The address of reference is %p.\n", (void*)ref_batch->img_ptr(j));
+        //printf( "The address of table is %p..\n", (void*)ccf_table->row_ptr(shift_idx, j));
+        
         cu_ccf_mult_m<<< img_num, ccf_table->get_ring_len()/2+1 >>>(
             d_img_data,                        // IN: take all our images and the selected reference
             ref_batch->img_ptr(j),             // IN: ...
@@ -1447,7 +1524,8 @@ void BatchHandler::ccf_mult_m(
             ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
             ring_num);                         // CONST: polar sampling parameters (ring length)
         KERNEL_ERR_CHK();
-	}
+        CUDA_ERR_CHK( cudaDeviceSynchronize() );
+    }
 }
 
 
@@ -1721,7 +1799,21 @@ void CcfResultTable::compute_alignment_param(
 {
     // prep
     float shift_limit = aln_res.aln_cfg->img_dim - aln_res.aln_cfg->ring_num - 2;
-
+    
+    //printf( "shift_off is  %d", shift_off() );
+    //printf( ", ref_off is  %d", ref_off() );
+    //printf( ", row_off is  %d", row_off() );
+    //printf( ", mirror_off is  %d", mirror_off() );
+    //printf( ", entry_num is  %d", entry_num() );
+    //printf( ", get_ring_num is  %d", get_ring_num() );
+    //printf( ", get_ring_len is  %d\n", get_ring_len() );
+    //for( unsigned int j=0; j<row_num(); j++ ){
+    //    printf("%d th row are: ", j);
+    //    for( unsigned int i=0; i<row_off(); i++ ){
+    //        printf("%f ", u_ccf_batch_table[j*row_off()+i]);
+    //    }
+    //    printf("\n\n");
+    //}
     // step 01: compute idx of max within each row of the ccf table
     compute_max_indices();
 
@@ -1744,6 +1836,7 @@ void CcfResultTable::compute_alignment_param(
         idx -= shift_off()*(idx/shift_off());
         // ref img id
         int ref_id = idx/ref_off();
+        tmp_param->ref_id = ref_id;
         idx -= ref_id*ref_off();
         // rotation angle (interpolated & adjusted for EMAN2 compatibility)
         tmp_param->angle = 360.0 - interpolate_angle( i, u_max_idx[i], idx );
@@ -1829,16 +1922,7 @@ float** create_rnd_data( const unsigned int img_num, const unsigned img_dim ){
     return img_data;
 }
 
-void print_data( const float** img_data, const unsigned int img_num, const unsigned int img_dim ){
-    for(int i=0; i<img_num; i++){
-        printf( "img[%d]:\n", i );
-        for( unsigned int y=0; y<img_dim; y++ ){
-            for( unsigned int x=0; x<img_dim; x++)
-                printf("%.2f ", img_data[img_dim*i+y][x]);
-            printf("\n");
-        }
-    }
-}
+
 
 void delete_rnd_data( float** img_data, const unsigned int img_num, const unsigned int img_dim ){
     for( unsigned int i=0; i<img_num; i++ ){

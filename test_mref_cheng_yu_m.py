@@ -1042,7 +1042,28 @@ def main():
             main_node = 0
             ### GPU Related ###
             Blockdata["shared_comm"]  = mpi.mpi_comm_split_type(mpi.MPI_COMM_WORLD, mpi.MPI_COMM_TYPE_SHARED, 0, mpi.MPI_INFO_NULL)
-            Blockdata["myid_on_node"] = mpi.mpi_comm_rank(Blockdata["shared_comm"])                                                                                                              
+            # 
+            # mpi_comm_split_type(comm, split_type, key, info)
+            # partitions the group associated with comm into disjoint subgroups, based on the type specied by split_type. 
+            # Each subgroup contains all processes of the same type. Within each subgroup, the processes are ranked in the 
+            # order defined by the value of the argument key, with ties broken according to their rank in the old group.
+            # 
+            # Args:
+            #     comm      : Communicator
+            #     split_type: Type of processes to be grouped together
+            #     key       : Control of rank assignment
+            #     info      : Info argument 
+            # 
+            # Returns:
+            #     newcomm   : New communicator to handle subgroups
+            # 
+            # Notes:
+            #     split_type=MPI_COMM_TYPE_SHARED: splits the communicator into subcommunicators, 
+            #                                       each of which can create a shared memory region.
+            #     key=0                          : preserve the old rank order as the new rank order
+            #     info=MPI_INFO_NULL             : no info
+            # 
+            Blockdata["myid_on_node"] = mpi.mpi_comm_rank(Blockdata["shared_comm"])
                                                                                                               
             tmp_img = EMData() # this is just a placeholder EMData object that we'll re-use in a couple of loops                                                                                                  
             # get total number of images (nima) and broadcast
@@ -1084,6 +1105,24 @@ def main():
             
             global MPI_GPU_COMM
             MPI_GPU_COMM = mpi.mpi_comm_split( mpi.MPI_COMM_WORLD, (Blockdata["myid_on_node"] in GPU_DEVICES), myid )
+            
+            # mpi_comm_split(comm, color, key) 
+            # partitions the group associated with comm into disjoint subgroups, one for each value of color.
+            # Each subgroup contains all processes of the same color. Within each subgroup, the processes are 
+            # ranked in the order defined by the value of the argument key, with ties broken according to their 
+            # rank in the old group.
+            # 
+            # Args:
+            #     comm : Communicator
+            #     color: Control of subset assignment
+            #     keys : Control of rank assignment 
+            # 
+            # Returns:
+            #     newcomm: New communicator to handle subgroups
+            # 
+            # ex:
+            #     in this function, the original world MPI will be divided into two subgroups, one is GPUs, one is non-GPUs.
+            
             #------------------------------------------------------[ Memory check ]
 
             # percentage of system memory we allow ourselves to occupy; we leave some

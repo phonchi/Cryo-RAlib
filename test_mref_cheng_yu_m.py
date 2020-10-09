@@ -73,6 +73,75 @@ def get_c_ptr_array( emdata_list ):
 def print_gpu_info( cuda_device_id ):
     cu_module.print_gpu_info( ctypes.c_int(cuda_device_id) )
 
+def send_EMData_w_ID(img, dst, tag, comm=-1):
+    from mpi import mpi_send, MPI_INT, MPI_FLOAT, MPI_COMM_WORLD
+    from sp_utilities import get_image_data
+
+    if comm==-1:
+        comm = MPI_COMM_WORLD
+
+    img_head = []
+    img_head.append(img.get_xsize())
+    img_head.append(img.get_ysize())
+    img_head.append(img.get_zsize())
+    img_head.append(img.is_complex())
+    img_head.append(img.is_ri())
+    img_head.append(img.get_attr("changecount"))
+    img_head.append(img.is_complex_x())
+    img_head.append(img.get_attr("is_complex_ri"))
+    img_head.append(int(img.get_attr("apix_x")*10000))
+    img_head.append(int(img.get_attr("apix_y")*10000))
+    img_head.append(int(img.get_attr("apix_z")*10000))
+    img_head.append(img.get_attr("ID"))
+
+    head_tag = 2*tag
+    mpi_send(img_head, 12, MPI_INT, dst, head_tag, comm)
+
+    img_data = get_image_data(img)
+    data_tag = 2*tag + 1
+    ntot = img_head[0]*img_head[1]*img_head[2]
+    mpi_send(img_data, ntot, MPI_FLOAT, dst, data_tag, comm)
+
+def recv_EMData_w_ID(src, tag, comm=-1):
+    from mpi import mpi_recv, MPI_INT, MPI_FLOAT, MPI_COMM_WORLD
+    from numpy import reshape
+    from EMAN2 import EMNumPy
+
+    if comm==-1:
+        comm = MPI_COMM_WORLD
+
+    head_tag = 2*tag
+    img_head = mpi_recv(12, MPI_INT, src, head_tag, comm)
+
+    nx = int(img_head[0])
+    ny = int(img_head[1])
+    nz = int(img_head[2])
+    is_complex = int(img_head[3])
+    is_ri = int(img_head[4])
+
+    data_tag = 2*tag+1
+    ntot = nx*ny*nz
+
+    img_data = mpi_recv(ntot, MPI_FLOAT, src, data_tag, comm)
+    if nz != 1:
+        img_data = reshape(img_data, (nz, ny, nx))
+    elif ny != 1:
+        img_data = reshape(img_data, (ny, nx))
+    else:
+        pass
+
+    img = EMNumPy.numpy2em(img_data)
+    img.set_complex(is_complex)
+    img.set_ri(is_ri)
+    img.set_attr_dict({"changecount":int(img_head[5]),  
+                        "is_complex_x":int(img_head[6]),  
+                        "is_complex_ri":int(img_head[7]),  
+                        "apix_x":int(img_head[8])/10000.0,  
+                        "apix_y":int(img_head[9])/10000.0,  
+                        "apix_z":int(img_head[10])/10000.0,
+                        "ID":int(img_head[11])})
+    return img
+
 ########################################################### GPU
 ###############################################################
 def mref_ali2d_gpu(
@@ -1208,6 +1277,7 @@ def main():
                 # read batch
                 for i, img_idx in enumerate( range(batch_start, batch_end) ):
                     tmp_img.read_image( args[0], img_idx )
+                    tmp_img.set_attr('ID',img_idx)
                     original_images[idx+i] = tmp_img.copy()
 #                 original_images = EMData.read_images(args[0], list(range(batch_start, batch_end)))
                 # go to next batch
@@ -1228,7 +1298,7 @@ def main():
 
                 for i, my_img in enumerate( range(image_start, image_end) ):
                     if gpu_img_start <= my_img < gpu_img_end:
-                        spx.send_EMData( original_images[i], gpu, my_img, comm=mpi.MPI_COMM_WORLD )
+                        send_EMData_w_ID( original_images[i], gpu, my_img, comm=mpi.MPI_COMM_WORLD )
                         original_images[i] = None
 
             original_images = [ i for i in original_images if i is not None ] # might be a GPU process sends some and keeps the rest
@@ -1245,7 +1315,7 @@ def main():
 
                     for proc_img in range( proc_img_start, proc_img_end ):
                         if image_start <= proc_img < image_end:
-                            original_images.append( spx.recv_EMData(proc, proc_img, comm=mpi.MPI_COMM_WORLD) )
+                            original_images.append( recv_EMData_w_ID(proc, proc_img, comm=mpi.MPI_COMM_WORLD) )
 
             # step 2b: each non-GPU proc makes sure they sent off all their data
             else:

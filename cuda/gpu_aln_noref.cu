@@ -1328,7 +1328,7 @@ BatchHandler::BatchHandler( const AlignConfig* batch_cfg, const char* batch_type
 
     img_num_per_tex = cu_dev_prop.maxTexture2DLinear[1] / img_dim_x;  // max. 2D texture height in linear memory by img_dim_x
     img_tex_num     = (img_num%img_num_per_tex == 0) ? img_num/img_num_per_tex : img_num/img_num_per_tex + 1;  // number of texture objects
-    
+    printf("begin img_tex_num %u, img_num_per_tex%u, img_num%u \n", img_tex_num, img_num_per_tex, img_num);
     if( strcmp(batch_type, "pre_align_ref_batch")==0){
         img_tex_obj     = (cudaTextureObject_t*)malloc( img_tex_num*2*sizeof(cudaTextureObject_t) );                 // array of texture objects
         CUDA_ERR_CHK( cudaMallocManaged(&u_img_tex_data, (img_tex_num*2)*sizeof(float*)) );
@@ -1685,9 +1685,17 @@ void BatchHandler::apply_alignment_param( AlignParam* aln_param , unsigned int s
     
     unsigned int img_storage_idx=0;
     for( unsigned int i=0; i<img_tex_num; i++ ){
-
-        unsigned int tmp_img_num = (i!=img_tex_num-1) ? img_num_per_tex : img_num - i*img_num_per_tex;
-
+        unsigned int tmp_img_num;
+        if(i*img_num_per_tex > img_num ){
+            break;
+        }
+        if((i+1)*img_num_per_tex > img_num ){
+            tmp_img_num = img_num - i*img_num_per_tex;
+        }else{
+            tmp_img_num = img_num_per_tex;
+        }
+        //unsigned int tmp_img_num = (i!=img_tex_num-1) ? img_num_per_tex : img_num - i*img_num_per_tex;
+        //printf(" img_num%u, tmp_img_num %u, img_dim_x%u, img_num_per_tex%u ", img_num, tmp_img_num, img_dim_x, img_num_per_tex);
         cu_transform_batch<<< tmp_img_num, img_dim_x >>>(
             img_tex_obj[i],
             img_dim_y,

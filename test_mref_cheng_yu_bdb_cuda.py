@@ -1,4 +1,29 @@
 #!/usr/local/EMAN2/bin/python
+
+#******************************************************************************
+#* 
+#* GPU based reference free alignment
+#* 
+#* Author (C) 2020, Szu-Chi Chung (steve2003121@gmail.com)
+#*            2020, Cheng-Yu Hung (veisteak@gmail.com)
+#*            2020, Huei-Lun Siao (oppty1335@gmail.com)
+#*            2020, Hung-Yi Wu (say66969@gmail.com)
+#* Copyright (C) 2020,Copyright (C) 2020, SABID Laboratory, Institute of Statistical Science, Academia Sinica
+#* 
+#*    This program is free software: you can redistribute it and/or modify it 
+#* under the terms of the GNU General Public License as published by the Free 
+#* Software Foundation, either version 3 of the License, or (at your option) any
+#* later version.
+#* 
+#*    This program is distributed in the hope that it will be useful, but WITHOUT
+#* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+#* FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+#* 
+#*    You should have received a copy of the GNU General Public License along with
+#* this program.  If not, please visit: http://www.gnu.org/licenses/
+#* 
+#******************************************************************************/
+
 from __future__ import print_function
 
 import os
@@ -23,7 +48,8 @@ float_ptr = ctypes.POINTER(ctypes.c_float)
 
 cu_module.ref_free_alignment_2D_init.restype = ctypes.c_ulonglong
 cu_module.pre_align_init.restype = ctypes.c_ulonglong
-cu_module.gpu_image_ptr.restype = ctypes.POINTER(ctypes.c_float)
+cu_module.mref_align_run_m.restype = ctypes.POINTER(ctypes.c_float)
+cu_module.get_num_ref.restype = ctypes.POINTER(ctypes.c_int)
 
 class Freezeable( object ):
 
@@ -73,6 +99,104 @@ def get_c_ptr_array( emdata_list ):
 
 def print_gpu_info( cuda_device_id ):
     cu_module.print_gpu_info( ctypes.c_int(cuda_device_id) )
+
+def output_attr(data, list_params, image_start, image_end):
+    import types
+    from sp_utilities import get_arb_params
+
+    params2d = {}
+    TransType = type(Transform())
+    params2d["dis"] = [image_start,image_end]
+    #prepare keys for float/int
+    value = get_arb_params(data[0], list_params)
+    ink = []
+    len_list = 0
+    for il in range(len(list_params)):
+        if type(value[il]) is int:
+            ink.append(1)
+            len_list += 1
+        elif type(value[il]) is float:
+            ink.append(0)
+            len_list += 1
+        elif type(value[il]) is TransType:
+            ink.append(2)
+            len_list += 12
+    params2d["ink"] = ink
+    params2d["len_list"] = len_list
+
+    nvalue = []
+    for im in range(image_start,image_end):
+        value = get_arb_params(data[im - image_start], list_params)
+        for il in range(len(value)):
+            if type(value[il]) is int:
+                nvalue.append(float(value[il]))
+            elif type(value[il]) is float:
+                nvalue.append(value[il])
+            elif type(value[il]) is TransType:
+                m = value[il].get_matrix()
+                assert len(m) == 12
+                for f in m:
+                    nvalue.append(f)
+    params2d["list_params"] = list_params
+    params2d["nvalue"] = nvalue
+    return params2d
+
+def write_attr(filename,nvalues, params_attr,image_start, image_end, myid, nproc, comm):
+    import types, mpi
+    from sp_utilities import set_arb_params, write_header, write_headers
+    
+    RangePush("assign params")
+    TransType = type(Transform())
+    # prepare keys for float/int
+    ink = params_attr["ink"]
+    len_list = params_attr["len_list"]
+    list_params = params_attr["list_params"]
+    nima = image_end - image_start
+
+    assert nima == len(nvalues)/len_list
+    dummy = EMData.read_images(filename, range(image_start, image_end), True)
+    for im in range(image_start, image_end):
+        ptr_begin = (im-image_start)*len_list
+        ilis = 0
+        nvalue = []
+        for il in range(len(list_params)):
+            if ink[il] == 1:
+                nvalue.append(int(nvalues[ptr_begin + ilis]))
+                ilis += 1
+            elif ink[il] == 0:
+                nvalue.append(float(nvalues[ptr_begin + ilis]))
+                ilis += 1
+            else:
+                assert ink[il] ==2
+                t = Transform()
+                tmp = []
+                for iii in range(ptr_begin + ilis, ptr_begin + ilis + 12):
+                    tmp.append(float(nvalues[iii]))
+                t.set_matrix(tmp)
+                ilis += 12
+                nvalue.append(t)
+        ISID = list_params.count("ID")
+        if ISID ==0:
+            imm = im
+        else:
+            imm = nvalue[list_params.index("ID")]
+
+        set_arb_params(dummy[imm-image_start], nvalue, list_params)
+    RangePop()
+    mpi.mpi_barrier(comm)
+    RangePush("Seq write headers")
+    for proc in range(nproc):
+        if myid == proc:
+            write_headers(filename, dummy, range(image_start, image_end))
+        mpi.mpi_barrier(comm)
+    RangePop()
+        #http://sparx-em.org/sparxwiki/I_O https://github.com/cryoem/eman2/blob/master/sphire/libpy_py2/sp_utilities.py#L3935
+        #dummy.write_image(
+        #        filename,
+        #        dummy.get_attr_default("ID", im),
+        #        EMUtil.ImageType.IMAGE_HDF,
+        #        True,
+        #    )
 
 def send_EMData_w_ID(img, dst, tag, comm=-1):
     from mpi import mpi_send, MPI_INT, MPI_FLOAT, MPI_COMM_WORLD
@@ -183,7 +307,10 @@ def mref_ali2d_gpu(
     # sanity check: gpu procs sound off
     if not mpi_gpu_proc: return []
 
-
+    import sp_global_def
+    if myid == main_node:
+        sp_global_def.LOGFILE =  os.path.join(outdir, sp_global_def.LOGFILE)
+        print_begin_msg("mref_ali2d_GPU")
     #----------------------------------[ setup ]
     print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "mref_ali2d_gpu() :: MPI proc["+str(myid)+"] run pre-alignment CPU setup" )
 
@@ -205,6 +332,8 @@ def mref_ali2d_gpu(
     else:
         auto_stop = False
 
+    
+    
     # determine global index values of particles handled by this process
     data = stack
     total_nima = len(data)
@@ -236,9 +365,27 @@ def mref_ali2d_gpu(
     # set default value for the last ring if none given
     if last_ring == -1: last_ring = nx/2-2
 
+    if myid == main_node:
+        print_msg("Input stack                 : %s\n"%(filename))
+        print_msg("Reference stack             : %s\n"%(refim))    
+        print_msg("Output directory            : %s\n"%(outdir))
+        print_msg("Maskfile                    : %s\n"%(maskfile))
+        print_msg("Inner radius                : %i\n"%(first_ring))
+        print_msg("Outer radius                : %i\n"%(last_ring))
+        print_msg("Ring step                   : %i\n"%(rstep))
+        print_msg("X search range              : %f\n"%(xrng[0]))
+        print_msg("Y search range              : %f\n"%(yrng[0]))
+        print_msg("Translational step          : %f\n"%(step[0]))
+        print_msg("Center type                 : %i\n"%(center))
+        print_msg("Maximum iteration           : %i\n"%(max_iter))
+        print_msg("CTF correction              : %s\n"%(CTF))
+        print_msg("Signal-to-Noise Ratio       : %f\n"%(snr))
+        print_msg("Random seed                 : %i\n\n"%(rand_seed))    
+        print_msg("User function               : %s\n"%(user_func_name))
+
     # sanity check for last_ring value
     if last_ring + max([max(xrng),max(yrng)]) > (nx-1) // 2:
-        ERROR( "Shift or radius is too large - particle crosses image boundary", "ali2d_MPI", 1 )
+        ERROR( "Shift or radius is too large - particle crosses image boundary", "ali2d_GPU", 1 )
 
     if maskfile:
         import  types
@@ -332,11 +479,14 @@ def mref_ali2d_gpu(
     cu_module.reset_shifts( ctypes.c_float(xrng[N_step]), ctypes.c_float(step[N_step]) )
         
 
-    
+    #gpu_batch_count = 1
     while Iter < max_iter and again:
+        refi2 = []
+        for j in range(numref):
+            refi2.append([refi[j][0].copy(), refi[j][1].copy(), 0])
         
         cu_module.pre_align_fetch(
-            get_c_ptr_array([tmp[0] for tmp in refi]),
+            get_c_ptr_array([tmp[0] for tmp in refi2]),
             ctypes.c_int(numref), 
             ctypes.c_char_p("ref_batch"))
         
@@ -347,17 +497,28 @@ def mref_ali2d_gpu(
             alpha, sx, sy, mirror, scale = util.get_params2D(data[im])
             old_ali_params.extend([alpha, sx, sy, mirror])
         RangePop()  
-        
+        for j in range(numref):
+            refi[j][0].to_zero()
+            refi[j][1].to_zero()
+            refi[j][2] = 0
         ############################################GPU
         #
         # FOR gpu_batch_i DO ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ >
         RangePush("run the alignment on gpu")
+        img_gpu_ptrs = []
+        num_refs_ptrs = []
         for gpu_batch_idx in range(gpu_batch_count):
         
             # determine next gpu batch and shove to the gpu (NOTE: if we
             # only have a single batch, this already happened earlier)
+            if(gpu_batch_idx > 0):
+                 cu_module.pre_align_fetch(
+                 get_c_ptr_array([tmp[0] for tmp in refi2]),
+                 ctypes.c_int(numref), 
+                 ctypes.c_char_p("ref_batch"))
+            
             if( gpu_batch_count > 1 ):
-        
+                
                 gpu_batch_start = gpu_batch_idx * gpu_batch_limit
                 gpu_batch_end   = gpu_batch_start + gpu_batch_limit
                 if gpu_batch_end > len(data): gpu_batch_end = len(data)
@@ -371,7 +532,17 @@ def mref_ali2d_gpu(
                 gpu_batch_end   = len(data)
                 
             # run the alignment on gpu
-            cu_module.mref_align_run( ctypes.c_int(gpu_batch_start), ctypes.c_int(gpu_batch_end))
+            img_gpu_ptr = cu_module.mref_align_run_m( ctypes.c_int(gpu_batch_start), ctypes.c_int(gpu_batch_end))
+
+            #RangePop()  
+            for i in range(numref):
+                Util.add_img(refi[i][0], EMNumPy.numpy2em(np.array(img_gpu_ptr[i*nx*nx:(i+1)*nx*nx]).reshape(nx,nx)))
+                Util.add_img(refi[i][1], EMNumPy.numpy2em(np.array(img_gpu_ptr[(numref+i)*nx*nx:(numref+i+1)*nx*nx]).reshape(nx,nx)))
+               
+            num_refs = cu_module.get_num_ref()
+            num_ptr = num_refs
+            for i in range(numref):
+                refi[i][2] += num_ptr[i]
             
             # print progress bar
             gpu_calls_ttl = 1 * max_iter * gpu_batch_count
@@ -382,49 +553,19 @@ def mref_ali2d_gpu(
             sys.stdout.flush()
             if gpu_calls_cnt+1 == gpu_calls_ttl: print("")
         RangePop() 
+
         # < ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ FOR gpu_batch_i DO
-        #set reference image to zero
-        RangePush("reference image to zero")
-        for j in range(numref):
-            refi[j][0].to_zero()
-            refi[j][1].to_zero()
-            refi[j][2] = 0
-        RangePop()
+ 
         
         RangePush("transfer angle and average")
         assign = [[] for i in range(numref)]
-        # ------------------------------------------------------------
-        gpu_image_ptr = cu_module.get_gpu_img_ptr()
-        print("type of gpu aln pointer = ",type(gpu_aln_param))
-        print("="*30)
-        print("type of gpu img pointer = ",type(gpu_image_ptr))
-        print("="*30)
-        # ------------------------------------------------------------
         #begin MPI section
         for k, img in enumerate(data):
-            # this is usually done in ormq()
-            angle   =  gpu_aln_param[k].angle
-            sx_neg  = -gpu_aln_param[k].shift_x
-            sy_neg  = -gpu_aln_param[k].shift_y
-            c_ang   =  math.cos( math.radians(angle) )
-            s_ang   = -math.sin( math.radians(angle) )
-            shift_x =  sx_neg*c_ang - sy_neg*s_ang
-            shift_y =  sx_neg*s_ang + sy_neg*c_ang
-            mn = gpu_aln_param[k].mirror
             iref = int(gpu_aln_param[k].ref_id)
-            # this happens in ali2d_single_iter()
-            set_params2D( img, [angle, shift_x, shift_y, int(mn), 1.0], "xform.align2d" )
             img.set_attr('assign',iref)
-            #apply current parameters and add to the average
-            temp = rot_shift2D(img,angle,shift_x,shift_y,mn)
-            it = k%2
-            Util.add_img(refi[iref][it],temp)
             assign[iref].append(list_of_particles[k])
-            refi[iref][2] += 1.0
-            #print("Assign to %d reference for image %d"%(iref,list_of_particles[k]))
         RangePop()
-            
-            
+
         RangePush("average")
         for j in range(numref):
             reduce_EMData_to_root(refi[j][0],myid,main_node,comm = mpi_comm)
@@ -508,23 +649,27 @@ def mref_ali2d_gpu(
             for j in range(numref):
                 bcast_EMData_to_all(refi[j][0], myid, main_node, mpi_comm)
         RangePop()
+    
+    for k, img in enumerate(data):
+        # this is usually done in ormq()
+        angle   =  gpu_aln_param[k].angle
+        sx_neg  = -gpu_aln_param[k].shift_x
+        sy_neg  = -gpu_aln_param[k].shift_y
+        c_ang   =  math.cos( math.radians(angle) )
+        s_ang   = -math.sin( math.radians(angle) )
+        shift_x =  sx_neg*c_ang - sy_neg*s_ang
+        shift_y =  sx_neg*s_ang + sy_neg*c_ang
+        mn = gpu_aln_param[k].mirror
+        set_params2D( img, [angle, shift_x, shift_y, int(mn), 1.0], "xform.align2d" )
+
+    
     # clean up 
     del assign
     RangePush("disk")
     # write out headers  and STOP, under MPI writing has to be done sequentially (time-consumming)
     mpi_barrier(mpi_comm)
-    if CTF and data_had_ctf == 0:
-        for im in range(nima): data[im].set_attr('ctf_applied', 0)
     par_str = ['xform.align2d', 'assign', 'ID']
-    if myid == main_node:
-        from sp_utilities import file_type
-        if(file_type(filename) == "bdb"):
-            from sp_utilities import recv_attr_dict_bdb
-            recv_attr_dict_bdb(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
-        else:
-            from sp_utilities import recv_attr_dict
-            recv_attr_dict(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
-    else:           send_attr_dict(main_node, data, par_str, image_start, image_end)
+    params2d = output_attr(data,par_str,image_start,image_end)
         
     # free gpu resources
     cu_module.gpu_clear()
@@ -533,7 +678,7 @@ def mref_ali2d_gpu(
     
     if myid == main_node:
         print_end_msg("mref_ali2d_GPU")
-
+    return params2d
 
 
 
@@ -1099,11 +1244,6 @@ def main():
             from utilities import disable_bdb_cache
             disable_bdb_cache()
 
-        prefix = os.path.join(outdir)
-        prefix += "/"
-        global_def.LOGFILE = prefix + global_def.LOGFILE
-        print(global_def.LOGFILE)
-
         global_def.BATCH = True
         if options.MPI:
             from mpi import mpi_init, mpi_comm_size, mpi_comm_rank, MPI_COMM_WORLD
@@ -1115,7 +1255,11 @@ def main():
         else:
             import time
             from mpi import mpi_init, mpi_comm_size, mpi_comm_rank, MPI_COMM_WORLD
+            from mpi import mpi_send, mpi_recv
+            from mpi import MPI_INT, MPI_FLOAT
             import mpi
+            from EMAN2db import db_open_dict
+            
             sys.argv = mpi_init(len(sys.argv),sys.argv)
             global Blockdata
             Blockdata = {}
@@ -1146,7 +1290,12 @@ def main():
             #     info=MPI_INFO_NULL             : no info
             # 
             Blockdata["myid_on_node"] = mpi.mpi_comm_rank(Blockdata["shared_comm"])
-                                                                                                              
+
+
+            # global cache setting to allow .bdb file reading from multiple nodes
+            if global_def.CACHE_DISABLE: spx.disable_bdb_cache()
+
+            
             tmp_img = EMData() # this is just a placeholder EMData object that we'll re-use in a couple of loops                                                                                                  
             # get total number of images (nima) and broadcast
             if(myid == main_node): 
@@ -1261,7 +1410,9 @@ def main():
             else:
                 outcome = 0
                 log = None
-                
+            
+
+            #Blockdata["output_stack"] = "bdb:" + os.path.join(outdir, "mref_ali2d" )
             from utilities       import bcast_number_to_all
             outcome  = bcast_number_to_all(outcome, source_node = main_node)
             if(outcome == 1):
@@ -1281,7 +1432,7 @@ def main():
             image_start, image_end = spx.MPI_start_end( Blockdata["total_nima"], Blockdata["nproc"], myid )
             original_images = [None] * (image_end-image_start)
 
-            
+            RangePush("Reading Data")
             # all MPI procs: read and immediately process/resample data batches
             idx=0
             batch_start = image_start
@@ -1292,12 +1443,12 @@ def main():
                     tmp_img.read_image( args[0], img_idx )
                     tmp_img.set_attr('ID',img_idx)
                     original_images[idx+i] = tmp_img.copy()
-#                 original_images = EMData.read_images(args[0], list(range(batch_start, batch_end)))
                 # go to next batch
                 batch_start += batch_img_num
                 idx += batch_img_num
 
             mpi.mpi_barrier( mpi.MPI_COMM_WORLD ) # just to print msg below after the progress bars above
+            RangePop()
             if myid==0: print( time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "main() :: Distributing workload to available GPUs" )
 
             #--------------------------------------------------[ collect data from all procs in GPU procs ]
@@ -1370,8 +1521,76 @@ def main():
                     cuda_device_occ=0.9 )
 
                 mpi.mpi_barrier(MPI_GPU_COMM)
+            else:
+                params2d = {}
+                params2d["nvalue"] = []
+
+            #--------------------------------------------------[ send params from GPU procs to all procs ]
+            
+            # Step 01: broadcast the needed parameters to all procs
+            global params_attr
+            params_attr = {}
+            if(myid==main_node):
+                params_attr["ink"] = params2d["ink"]
+                params_attr["len_list"] = params2d["len_list"]
+                params_attr["list_params"] = ",".join(params2d["list_params"])#join first because the func only bcast single string
+            else:
+                params_attr["ink"] = []
+                params_attr["len_list"] = 0
+                params_attr["list_params"] = ''
+            
+            params_attr["ink"] = spx.bcast_list_to_all(params_attr["ink"],myid,source_node = main_node)
+            params_attr["len_list"] = spx.bcast_number_to_all(params_attr["len_list"],source_node = main_node)
+            params_attr["list_params"] = spx.send_string_to_all(params_attr["list_params"],source_node = main_node)
+            params_attr["list_params"] = params_attr["list_params"].split(",")
+            
+            RangePush("Transfer data to all proc")
+            # Step 02: every GPU procs send their params to all procs looking for it
+            if myid in GPU_DEVICES:
+                image_start,image_end = params2d["dis"]
+                for proc in range( Blockdata["nproc"] ):
+                    proc_img_start, proc_img_end = spx.MPI_start_end( Blockdata["total_nima"], Blockdata["nproc"], proc )
+
+                    if proc==myid:
+                        continue
+
+                    for i,proc_img in enumerate(range(proc_img_start,proc_img_end)):
+                        if image_start <= proc_img < image_end:
+                            ptr_begin = (proc_img-image_start)*params_attr["len_list"]
+                            ptr_end = ptr_begin + params_attr["len_list"]
+                            value = params2d["nvalue"][ptr_begin:ptr_end]
+                            mpi_send(value, len(value), MPI_FLOAT, proc, proc_img, mpi.MPI_COMM_WORLD)
+                            for j in range(ptr_begin,ptr_end):
+                                params2d["nvalue"][j] = None
+                params2d["nvalue"] = [i for i in params2d["nvalue"] if i is not None]
+
+            #Step 03: All procs receive their own params
+            image_start, image_end = spx.MPI_start_end( Blockdata["total_nima"], Blockdata["nproc"], myid )
+            for gpu in GPU_DEVICES:
+                gpu_img_start, gpu_img_end = spx.MPI_start_end( Blockdata["total_nima"], len(GPU_DEVICES), gpu )
+
+                if gpu==myid:
+                    continue
+
+                for proc_img in range(image_start, image_end):
+                    if gpu_img_start <= proc_img < gpu_img_end:
+                        value = mpi_recv(params_attr["len_list"],MPI_FLOAT,gpu,proc_img,mpi.MPI_COMM_WORLD)
+                        #print(value)
+                        params2d["nvalue"].extend(value)
                 
-                if myid==0: print(time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "main() :: Pre-alignment call complete" )
+            RangePop()
+            print("myid: %d, data_length: %d, len list %d, theoretic_length: %d"%(myid, len(params2d["nvalue"]), params_attr["len_list"],image_end-image_start))
+            mpi.mpi_barrier(mpi.MPI_COMM_WORLD)
+            
+            write_attr(args[0],params2d["nvalue"],params_attr, image_start, image_end, myid, Blockdata["nproc"], mpi.MPI_COMM_WORLD)
+            
+            #https://docs.scipy.org/doc/numpy-1.13.0/reference/c-api.array.html
+                    
+                    
+            
+            mpi.mpi_barrier(mpi.MPI_COMM_WORLD)
+                
+            if myid==0: print(time.strftime("%Y-%m-%d %H:%M:%S :: ", time.localtime()) + "main() :: Pre-alignment call complete" )
 
 
 

@@ -4,7 +4,12 @@
 GPU based reference free alignment
 
 Author (C) 2019, Fabian Schoenfeld (fabian.schoenfeld@mpi-dortmund.mpg.de)
-Copyright (C) 2019, Max Planck Institute of Molecular Physiology, Dortmund
+           2020, Szu-Chi Chung (steve2003121@gmail.com)
+           2020, Cheng-Yu Hung (veisteak@gmail.com)
+           2020, Huei-Lun Siao (oppty1335@gmail.com)
+           2020, Hung-Yi Wu (say66969@gmail.com)
+Copyright (C) 2019,Copyright (C) 2019, Max Planck Institute of Molecular Physiology, Dortmund
+Copyright (C) 2020,Copyright (C) 2020, SABID Laboratory, Institute of Statistical Science, Academia Sinica
 
    This program is free software: you can redistribute it and/or modify it 
 under the terms of the GNU General Public License as published by the Free 
@@ -361,7 +366,6 @@ extern "C" void pre_align_fetch(
     if( strcmp(batch_select, "sbj_batch")==0 ) batch_handler = aln_res.sbj_batch;
     if( strcmp(batch_select, "ref_batch")==0 ){
         batch_handler = aln_res.ref_batch;
-        //print_data( (const float**)img_data, img_num, aln_res.aln_cfg->img_dim );
     }
     if( batch_handler == NULL ){
         printf( "ERROR! fetch_data() :: Unknown batch type \'%s\' specified.\n", batch_select );
@@ -369,9 +373,6 @@ extern "C" void pre_align_fetch(
     }
 
     // transfer data
-    //printf(batch_select);
-    //printf("\n");
-    //print_data( (const float**)img_data, img_num, aln_res.aln_cfg->img_dim );
     batch_handler->fetch_data( img_data, 0, img_num );
 }
 
@@ -436,12 +437,80 @@ extern "C" void mref_align_run( const int start_idx, const int stop_idx){
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
    
     sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
-    //for ( unsigned int i=start_idx; i < stop_idx; i++ ){
-    //    printf( "shift x is %f", aln_res.u_aln_param[i].shift_x );
-    //    printf( ", shift y is %f", aln_res.u_aln_param[i].shift_y );
-    //    printf( ", angle is %f", aln_res.u_aln_param[i].angle );
-    //    printf( ", id is %d\n", aln_res.u_aln_param[i].ref_id );
+     
+}
+
+extern "C" int* get_num_ref(){
+    return aln_res.ref_batch->get_num_ref();
+}
+
+//-------------------------------------------------[ muti-refernce alignment ]
+extern "C" float* mref_align_run_m( const int start_idx, const int stop_idx){
+
+    //----------------------------------------------------------------[ setup ]
+
+    // grab batch handlers
+    BatchHandler* ref_batch = aln_res.ref_batch;
+    BatchHandler* sbj_batch = aln_res.sbj_batch;
+    
+    //Only print data if the data is small enough
+    //unsigned int img_dim = aln_res.aln_cfg->img_dim;
+    //size_t tex_pitch;
+    //float h_tex_data[ img_dim*img_dim ];
+    //
+    //for( unsigned int i=0; i<aln_res.aln_cfg->sbj_num; i++ ){
+    //    float* d_tex_data = aln_res.sbj_batch->get_tex_data( &tex_pitch );
+    //    printf( "img2[%d]:\n", i );
+    //    CUDA_ERR_CHK( cudaMemcpy2D(h_tex_data, img_dim*sizeof(float),
+    //                  &d_tex_data[(tex_pitch/sizeof(float))*img_dim*i], tex_pitch,
+    //                  img_dim*sizeof(float), img_dim,
+    //                  cudaMemcpyDeviceToHost) );
+    //    for( unsigned int j=0; j<img_dim*img_dim; j++ ){
+    //        printf("%.6f ", h_tex_data[j]);
+    //    }
+    //    printf("\n");
     //}
+    
+    //unsigned int img_dim = aln_res.aln_cfg->img_dim;
+    //size_t tex_pitch;
+    //float h_tex_data[ img_dim*img_dim ];
+    //
+    //for( unsigned int i=0; i<aln_res.aln_cfg->ref_num; i++ ){
+    //    float* d_tex_data = aln_res.ref_batch->get_tex_data( &tex_pitch );
+    //    printf( "img2[%d]:\n", i );
+    //    CUDA_ERR_CHK( cudaMemcpy2D(h_tex_data, img_dim*sizeof(float),
+    //                  &d_tex_data[(tex_pitch/sizeof(float))*img_dim*i], tex_pitch,
+    //                  img_dim*sizeof(float), img_dim,
+    //                  cudaMemcpyDeviceToHost) );
+    //    for( unsigned int j=0; j<img_dim*img_dim; j++ ){
+    //        printf("%.6f ", h_tex_data[j]);
+    //    }
+    //    printf("\n");
+    //}
+    
+    // update reference
+    ref_batch->resample_to_polar( 0, 0, 0, aln_res.u_polar_sample_coords );
+    ref_batch->apply_FFT();
+
+    //------------------------------------------------------------[ alignment ]
+
+    for( unsigned int shift_idx=0; shift_idx < aln_res.shifts->size(); shift_idx++ ){
+        sbj_batch->resample_to_polar( 
+            (*aln_res.shifts)[shift_idx][0],
+            (*aln_res.shifts)[shift_idx][1], start_idx,
+            aln_res.u_polar_sample_coords );
+        sbj_batch->apply_FFT();
+        sbj_batch->ccf_mult_m( ref_batch, shift_idx, 0 );
+    }
+    sbj_batch->apply_IFFT();
+    CUDA_ERR_CHK( cudaDeviceSynchronize() );
+   
+    sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
+    sbj_batch->apply_alignment_param( aln_res.u_aln_param, start_idx );  // NOTE: includes device sync at the end
+    ref_batch->fetch_averages_m( sbj_batch->img_ptr(0),  sbj_batch->get_img_num(), start_idx);       // NOTE: includes device sync at the end
+    ref_batch->return_averages();
+    return ref_batch->get_h_data();
+
 }
 
 
@@ -699,7 +768,7 @@ extern "C" void ref_free_alignment_2D(){
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
 
     sbj_batch->compute_alignment_param( 0, cfg->sbj_num, aln_res.shifts, aln_res.u_aln_param );
-    sbj_batch->apply_alignment_param( aln_res.u_aln_param );  // NOTE: includes device sync at the end
+    sbj_batch->apply_alignment_param( aln_res.u_aln_param, 0 );  // NOTE: includes device sync at the end
     ref_batch->fetch_averages( sbj_batch->img_ptr(0) );       // NOTE: includes device sync at the end
 }
 
@@ -934,7 +1003,7 @@ __global__ void cu_ccf_mult(
 }
 
 
-// Build cid list in main loop!!!!!!!!!!!!!
+// multireference_alignment
 __global__ void cu_ccf_mult_m( 
     const float*       sbj_batch_ptr, 
     const float*       ref_batch_ptr, 
@@ -1009,10 +1078,6 @@ __global__ void cu_ccf_mult_m(
     unsigned int bid = blockIdx.x;
     unsigned int tid = threadIdx.x;
 
-    // each block picks their reference (NOTE: blockDim.x*2 == ring_len+2)
-    //ref_batch_ptr = &ref_batch_ptr[ u_aln_param[bid].ref_id * (blockDim.x*2)*ring_num ];
-    //ref_batch_ptr = &ref_batch_ptr[ refid * (blockDim.x*2)*ring_num ];
-
     // each block picks their image (NOTE: blockDim.x*2 == ring_len+2)
     unsigned int sbj_idx = bid * blockDim.x*2*ring_num;  // img_index x img_size
 
@@ -1069,7 +1134,8 @@ __global__ void cu_transform_batch(
     const unsigned int        img_dim_y,           // images in the texture will have this y-dim
     const AlignParam*         u_aln_param,         // apply these alignment parameters to each img
     float*                    img_storage,         // and store the results in this buffer
-    const unsigned int        img_storage_start )  // starting at this index
+    const unsigned int        img_storage_start,
+    const unsigned int start_idx)  // starting at this index
 {
 
     unsigned int img_idx = blockIdx.x + img_storage_start;  // blockIdx  in [0,img_num_per_texture-1]
@@ -1086,11 +1152,11 @@ __global__ void cu_transform_batch(
     for( unsigned int img_coord_y=0; img_coord_y<img_dim_y; img_coord_y++ ){
 
         // mirror
-        src_coord_x = (u_aln_param[img_idx].mirror) ? blockDim.x - img_coord_x : img_coord_x;
+        src_coord_x = (u_aln_param[start_idx+img_idx].mirror) ? blockDim.x - img_coord_x : img_coord_x;
         src_coord_y = img_coord_y;
 
         // rotation
-        angle = DEG2RAD*u_aln_param[img_idx].angle;
+        angle = DEG2RAD*u_aln_param[start_idx+img_idx].angle;
         angle_sin = sinf(angle);
         angle_cos = cosf(angle);
 
@@ -1105,8 +1171,8 @@ __global__ void cu_transform_batch(
         src_coord_y += img_ctr_y;
 
         // shift
-        src_coord_x = src_coord_x + u_aln_param[img_idx].shift_x + 0.5;
-        src_coord_y = src_coord_y + u_aln_param[img_idx].shift_y + 0.5;
+        src_coord_x = src_coord_x + u_aln_param[start_idx+img_idx].shift_x + 0.5;
+        src_coord_y = src_coord_y + u_aln_param[start_idx+img_idx].shift_y + 0.5;
         
         // fetch value from the source image and put into our storage buffer for the transformed data
         img_storage_idx = img_idx * img_dim_y*blockDim.x +  // select image slot
@@ -1148,6 +1214,51 @@ __global__ void cu_average_batch(
         (tgt_tex_data[0])[dst_idx] = avg / (cid_idx[ref_idx+1]-cid_idx[ref_idx]);
     }
 }
+
+__global__ void cu_average_batch_m( 
+    const float*        img_storage,     // take this buffer holding a bunch of images
+    const unsigned int  img_dim_y,       // each of which has this y-dim
+    const AlignParam*   align_params,         // block[i] averages over the images from cid_idx[i] to cid_idx[i+1]
+    float**             tgt_tex_data,    // average[i] is written into slot[i] of texture tgt_txt_data[0]
+    const size_t        tgt_tex_pitch, // texture pitch of the allocated 2D memory on the device
+    unsigned int sbj_img_num, // subject image number
+    int* num_ref,
+    unsigned int start)   
+{
+
+    unsigned int ref_idx = blockIdx.x;       // [0,ref_num-1]
+    unsigned int img_coord_x = threadIdx.x;  // [0,img_dim_x-1]
+    unsigned int src_idx, dst_idx;
+
+    unsigned int it;
+    for( unsigned int img_coord_y=0; img_coord_y<img_dim_y; img_coord_y++ ){
+        float avg0 = 0.0;
+        float avg1 = 0.0;
+        unsigned int count = 0;
+        for( unsigned int img_idx=0; img_idx<sbj_img_num; img_idx++ ){
+            it = (start+img_idx)%2;
+            if (align_params[start+img_idx].ref_id == ref_idx) {
+                src_idx = img_idx * img_dim_y* blockDim.x +
+                          img_coord_y * blockDim.x +
+                          img_coord_x;
+                count +=1;
+                if(it == 0){ 
+                    avg0 += img_storage[ src_idx ];
+
+                }else{
+                    avg1 += img_storage[ src_idx ];
+                }
+            }
+        }
+        dst_idx = ref_idx * img_dim_y*(tgt_tex_pitch/sizeof(float)) +  // NOTE: the incremental unit for pitched
+                  img_coord_y * (tgt_tex_pitch/sizeof(float)) +        // memory on the device is a single byte!
+                  img_coord_x;
+        (tgt_tex_data[0])[dst_idx] = avg0; 
+        (tgt_tex_data[1])[dst_idx] = avg1;
+        num_ref[ref_idx] = count;
+    }
+}
+
 
 __global__ void cu_max_idx_silly(
     const float*       sbj_row_ptr,     // take this buffer holding a number of data rows
@@ -1217,20 +1328,35 @@ BatchHandler::BatchHandler( const AlignConfig* batch_cfg, const char* batch_type
 
     img_num_per_tex = cu_dev_prop.maxTexture2DLinear[1] / img_dim_x;  // max. 2D texture height in linear memory by img_dim_x
     img_tex_num     = (img_num%img_num_per_tex == 0) ? img_num/img_num_per_tex : img_num/img_num_per_tex + 1;  // number of texture objects
-    img_tex_obj     = (cudaTextureObject_t*)malloc( img_tex_num*sizeof(cudaTextureObject_t) );                 // array of texture objects
-    CUDA_ERR_CHK( cudaMallocManaged(&u_img_tex_data, img_tex_num*sizeof(float*)) );
-
+    
+    if( strcmp(batch_type, "pre_align_ref_batch")==0){
+        img_tex_obj     = (cudaTextureObject_t*)malloc( img_tex_num*2*sizeof(cudaTextureObject_t) );                 // array of texture objects
+        CUDA_ERR_CHK( cudaMallocManaged(&u_img_tex_data, (img_tex_num*2)*sizeof(float*)) );
+        CUDA_ERR_CHK( cudaMallocManaged(&h_tex_data, img_num*2*img_dim_x*img_dim_x*sizeof(float*)) );
+        CUDA_ERR_CHK( cudaMallocManaged(&num_ref, img_num*sizeof(int)) );
+    }else{
+        img_tex_obj     = (cudaTextureObject_t*)malloc( img_tex_num*sizeof(cudaTextureObject_t) );                 // array of texture objects
+        CUDA_ERR_CHK( cudaMallocManaged(&u_img_tex_data, img_tex_num*sizeof(float*)) );
+    }
     if( strcmp(batch_type, "reference_batch")==0 || strcmp(batch_type, "pre_align_ref_batch")==0 ){
         if( img_num > img_num_per_tex ){
             printf( "\nERROR! BatchHandler::BatchHandler(): img_num[%d] > img_num_per_tex[%d] for type \'%s\'\n\n", img_num, img_num_per_tex, batch_type );
             assert( img_num <= img_num_per_tex ); // see BatchHandler::fetch_averages() for why this is an issue
         }
     }
-
-    // allocate texture buffers
-    for( unsigned int i=0; i<img_tex_num; i++ ){
-        unsigned int allocate_img_num = (i!=img_tex_num-1) ? img_num_per_tex : img_num - i*img_num_per_tex;
-        create_texture_objects( allocate_img_num, i );
+    if( strcmp(batch_type, "pre_align_ref_batch")==0){
+        // allocate texture buffers
+        for( unsigned int i=0; i<img_tex_num*2; i++ ){
+            unsigned int allocate_img_num = img_num;
+            create_texture_objects( allocate_img_num, i );
+        }
+    }
+    else{
+        for( unsigned int i=0; i<img_tex_num; i++ ){
+            unsigned int allocate_img_num = (i!=img_tex_num-1) ? img_num_per_tex : img_num - i*img_num_per_tex;
+            create_texture_objects( allocate_img_num, i );
+        }
+    
     }
 
     // polar data params & buffer allocation
@@ -1258,6 +1384,7 @@ BatchHandler::BatchHandler( const AlignConfig* batch_cfg, const char* batch_type
     unsigned int   fft_buffer_size   = img_num*(img_dim_x+2)*img_dim_y*sizeof(float);  // in-place fft needs one additional column of complex values
 
     //CUDA_ERR_CHK ( cudaMallocManaged(&d_img_data, max(polar_buffer_size+1024*1024, fft_buffer_size+1024*1024)) );
+    //printf("size %d", max(polar_buffer_size, fft_buffer_size)/sizeof(float));
     CUDA_ERR_CHK ( cudaMallocManaged(&d_img_data, max(polar_buffer_size, fft_buffer_size)) );
 
     // CUFFT plan
@@ -1326,19 +1453,38 @@ BatchHandler::~BatchHandler(){
         ccf_table = NULL;
     }
     // destroy raw data behind the texture objects
-    if( u_img_tex_data != NULL ){
-        for( unsigned int i=0; i<img_tex_num; i++ )
-            CUDA_ERR_CHK( cudaFree(u_img_tex_data[i]) );
-        cudaFree(u_img_tex_data);
-        u_img_tex_data = NULL;
+    if(strcmp(this->batch_type, "pre_align_ref_batch")==0 ){
+        if( u_img_tex_data != NULL ){
+            for( unsigned int i=0; i<img_tex_num*2; i++ )
+                CUDA_ERR_CHK( cudaFree(u_img_tex_data[i]) );
+            cudaFree(u_img_tex_data);
+            u_img_tex_data = NULL;
+        }
+    }
+    else{
+        if( u_img_tex_data != NULL ){
+            for( unsigned int i=0; i<img_tex_num; i++ )
+                CUDA_ERR_CHK( cudaFree(u_img_tex_data[i]) );
+            cudaFree(u_img_tex_data);
+            u_img_tex_data = NULL;
+        }
     }
     // destroy texture objects
     if( img_tex_obj != NULL ){
-        for( unsigned int i=0; i<img_tex_num; i++ )
-            CUDA_ERR_CHK( cudaDestroyTextureObject(img_tex_obj[i]) );
-        img_num_per_tex = 0;
-        img_tex_obj = NULL;
-        img_tex_num = 0;
+        if(strcmp(this->batch_type, "pre_align_ref_batch")==0 ){
+            for( unsigned int i=0; i<img_tex_num*2; i++ )
+                CUDA_ERR_CHK( cudaDestroyTextureObject(img_tex_obj[i]) );
+            img_num_per_tex = 0;
+            img_tex_obj = NULL;
+            img_tex_num = 0;
+        }else{
+            for( unsigned int i=0; i<img_tex_num; i++ )
+                CUDA_ERR_CHK( cudaDestroyTextureObject(img_tex_obj[i]) );
+            img_num_per_tex = 0;
+            img_tex_obj = NULL;
+            img_tex_num = 0;
+        
+        }
     }
     // destroy buffer for processed image data
     if( d_img_data != NULL ){
@@ -1395,6 +1541,7 @@ void BatchHandler::fetch_data(
     // update number of images stored after data fetch
     img_num = img_limit;
 
+
     // go fetch
     for( unsigned int tex_idx=0; tex_idx < img_tex_num; tex_idx++ ){
         // number of images to be copied into the selected texture and starting index of the first image to be copied
@@ -1414,6 +1561,12 @@ void BatchHandler::fetch_data(
         // copy the data from individual images into one of several allocated continuous texture memory buffers
         unsigned int offset = 0;
         for( unsigned int i=move_img_idx; i < move_img_idx + move_img_num; i++ ){
+            if(strcmp(this->batch_type, "pre_align_ref_batch")==0 ){
+                CUDA_ERR_CHK( cudaMemcpy2D( &(u_img_tex_data[tex_idx+1])[offset], img_tex_pitch,  // destination address and pitch
+                                        img_data[i], img_dim_x*sizeof(float),               // source address and pitch
+                                        img_dim_x*sizeof(float), img_dim_y,                 // data transfer width and height
+                                        cudaMemcpyHostToDevice ) );
+            }
             CUDA_ERR_CHK( cudaMemcpy2D( &(u_img_tex_data[tex_idx])[offset], img_tex_pitch,  // destination address and pitch
                                         img_data[i], img_dim_x*sizeof(float),               // source address and pitch
                                         img_dim_x*sizeof(float), img_dim_y,                 // data transfer width and height
@@ -1511,10 +1664,7 @@ void BatchHandler::ccf_mult_m(
     //}
     // invoke cuda kernel to process the ccf multiplications, this will go through all the reference
     //printf( "The image number is %d..\n", img_num);
-    for ( unsigned int j=0; j<ref_batch->img_num; j++ ){
-        //printf( "The address of reference is %p.\n", (void*)ref_batch->img_ptr(j));
-        //printf( "The address of table is %p..\n", (void*)ccf_table->row_ptr(shift_idx, j));
-        
+    for ( unsigned int j=0; j<ref_batch->img_num; j++ ){        
         cu_ccf_mult_m<<< img_num, ccf_table->get_ring_len()/2+1 >>>(
             d_img_data,                        // IN: take all our images and the selected reference
             ref_batch->img_ptr(j),             // IN: ...
@@ -1531,7 +1681,7 @@ void BatchHandler::ccf_mult_m(
 
 void BatchHandler::apply_IFFT(){ ccf_table->apply_IFFT(); }
 
-void BatchHandler::apply_alignment_param( AlignParam* aln_param ){
+void BatchHandler::apply_alignment_param( AlignParam* aln_param , unsigned int start_idx){
     
     unsigned int img_storage_idx=0;
     for( unsigned int i=0; i<img_tex_num; i++ ){
@@ -1543,13 +1693,14 @@ void BatchHandler::apply_alignment_param( AlignParam* aln_param ){
             img_dim_y,
             aln_param,
             d_img_data,
-            img_storage_idx);
+            img_storage_idx, start_idx);
 
         KERNEL_ERR_CHK();
         img_storage_idx += tmp_img_num;
     }
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
 }
+
 
 void BatchHandler::fetch_averages( float* img_data ){
 
@@ -1565,6 +1716,47 @@ void BatchHandler::fetch_averages( float* img_data ){
     KERNEL_ERR_CHK();
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
 }
+
+void BatchHandler::fetch_averages_m( float* img_data , unsigned int sbj_img_num, unsigned int start){
+
+    /* WARNING: This assumes that all references fit into a single texture! */
+
+
+    cu_average_batch_m<<< img_num, img_dim_x >>>(
+        img_data,
+        img_dim_y,
+        aln_res.u_aln_param,
+        u_img_tex_data,
+        img_tex_pitch,
+        sbj_img_num,
+        num_ref,
+        start
+        );
+
+    KERNEL_ERR_CHK();
+    CUDA_ERR_CHK( cudaDeviceSynchronize() );
+}
+
+void BatchHandler::return_averages(){
+
+    /* WARNING: This assumes that all references fit into a single texture! */
+    
+    float* d_tex_data = u_img_tex_data[0];
+    for( unsigned int i=0; i<img_num; i++ ){
+        CUDA_ERR_CHK( cudaMemcpy2D(&h_tex_data[i*img_dim_x*img_dim_x], img_dim_x*sizeof(float),
+                      &d_tex_data[(img_tex_pitch/sizeof(float))*img_dim_x*i], img_tex_pitch,
+                      img_dim_x*sizeof(float), img_dim_x,
+                      cudaMemcpyDeviceToHost) );
+    }
+    d_tex_data = u_img_tex_data[1];
+    for( unsigned int i=0; i<img_num; i++ ){
+        CUDA_ERR_CHK( cudaMemcpy2D(&h_tex_data[(img_num+i)*img_dim_x*img_dim_x], img_dim_x*sizeof(float),
+                      &d_tex_data[(img_tex_pitch/sizeof(float))*img_dim_x*i], img_tex_pitch,
+                      img_dim_x*sizeof(float), img_dim_x,
+                      cudaMemcpyDeviceToHost) );
+    }
+}
+
 
 void BatchHandler::apply_tangent_filter( const float cutoff_freq, const float falloff ){
 

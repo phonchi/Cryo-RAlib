@@ -4,7 +4,12 @@
 GPU based multireference alignment
 
 Author (C) 2019, Fabian Schoenfeld (fabian.schoenfeld@mpi-dortmund.mpg.de)
-Copyright (C) 2019, Max Planck Institute of Molecular Physiology, Dortmund
+           2020, Szu-Chi Chung (steve2003121@gmail.com)
+           2020, Cheng-Yu Hung (veisteak@gmail.com)
+           2020, Huei-Lun Siao (oppty1335@gmail.com)
+           2020, Hung-Yi Wu (say66969@gmail.com)
+Copyright (C) 2019,Copyright (C) 2019, Max Planck Institute of Molecular Physiology, Dortmund
+Copyright (C) 2020,Copyright (C) 2020, SABID Laboratory, Institute of Statistical Science, Academia Sinic
 
    This program is free software: you can redistribute it and/or modify it 
 under the terms of the GNU General Public License as published by the Free 
@@ -75,6 +80,8 @@ extern "C" void pre_align_fetch(
 
 extern "C" void pre_align_run( const int start_idx, const int stop_idx );
 extern "C" void mref_align_run( const int start_idx, const int stop_idx );
+extern "C" float* mref_align_run_m( const int start_idx, const int stop_idx );
+
 
 
 //-------------------------------------------------[ reference-free alignment ]
@@ -96,7 +103,13 @@ extern "C" void ref_free_alignment_2D();
 
 extern "C" void ref_free_alignment_2D_filter_references( const float cutoff_freq, const float falloff );
 
+//======================================================[ mref]
+
+extern "C" int* get_num_ref();
+
 //======================================================[ CcfResultTable class]
+
+
 
 class CcfResultTable{
 
@@ -177,6 +190,8 @@ class BatchHandler{
         float** u_img_tex_data;            // array of device pointers to the data managed by the individual texture objects
                                            // NOTE: pointer array in unified memory; pointers point to device memory
 
+        float* h_tex_data;  
+        int* num_ref;
         void create_texture_objects( const unsigned int num, const unsigned int tex_obj_idx );
 
     public:
@@ -213,9 +228,10 @@ class BatchHandler{
             const unsigned int          param_limit,
             const vector<array<float,2>>* shifts,
             AlignParam*                 aln_param );
-        void apply_alignment_param( AlignParam* aln_param );
+        void apply_alignment_param( AlignParam* aln_param, unsigned int start_idx );
         void fetch_averages( float* img_data );
-
+        void fetch_averages_m( float* img_data , unsigned int sbj_img_num, unsigned int start);
+        void return_averages();
         void apply_tangent_filter( const float cutoff_freq, const float falloff );
         
         // utility
@@ -226,6 +242,10 @@ class BatchHandler{
         ///////////////////////////////
         float* get_tex_data(size_t* pitch) const { *pitch=img_tex_pitch; return u_img_tex_data[0]; }
         ///////////////////////////////
+        float* get_apply_ptr(){return d_img_data;}
+        float* get_h_data(){return h_tex_data;}
+        int* get_num_ref(){return num_ref;}
+        unsigned int get_img_num(){return img_num;}
 };
 
 #endif

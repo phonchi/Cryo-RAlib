@@ -3,8 +3,9 @@
 This is the repository that contains gpu-accelerated multireference alignment code for cryo-EM image processing.
 The code is used in the 2020 NCHC GPU Hackathon.
 
-Team member:  Szu Chi Chung, Cheng-Yu Hung, Huei-Lun Siao, Hung-Yi Wu
-Mentor: Ryan Jeng  
+Team member:  [Szu Chi Chung](https://github.com/phonchi), [Cheng-Yu Hung](https://github.com/veis5566), [Huei-Lun Siao](https://github.com/oppty1335), [Hung-Yi Wu](https://github.com/Hungyi5), Institute of Science, Academia Sinica
+
+Mentor: Ryan Jeng, Nvidia
 
 
 ## 1. Install 

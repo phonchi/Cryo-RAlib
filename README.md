@@ -11,9 +11,12 @@ Mentor: Ryan Jeng, Nvidia
 ## 1. Install 
 - Install `EMAN2` and `Sphire`: 
     * Please install [`EMAN2.31`](https://blake.bcm.edu/emanwiki/EMAN2/Install).
+    * If you would like to use the version that use CuPy install according to [here](https://github.com/cupy/cupy).
+>    Note you may need to relink the nvrtc library `ln -s /usr/local/cuda/lib64/libnvrtc-builtins.so.10.0.130 /usr/local/EMAN2/lib/libnvrtc-builtins.so`
 
 ## 2. Setup
 - `$ ./install.sh`
 
 ## 3. Test
 - `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py image_stack.hdf  ref_stack.hdf out --ou=36 --xr=1 --yr=1`
+- `mpirun -np 4 test_mref_gpu_align.py image_stack.hdf  ref_stack.hdf out --ou=36 --xr=1 --yr=1`

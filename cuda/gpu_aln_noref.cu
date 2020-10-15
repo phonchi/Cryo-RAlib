@@ -377,49 +377,19 @@ extern "C" void pre_align_fetch(
 }
 
 
-extern "C" void mref_align_run( const int start_idx, const int stop_idx){
+
+extern "C" int* get_num_ref(){
+    return aln_res.ref_batch->get_num_ref();
+}
+
+
+extern "C" void* mref_align_run( const int start_idx, const int stop_idx){
 
     //----------------------------------------------------------------[ setup ]
 
     // grab batch handlers
     BatchHandler* ref_batch = aln_res.ref_batch;
     BatchHandler* sbj_batch = aln_res.sbj_batch;
-    
-    //unsigned int img_dim = aln_res.aln_cfg->img_dim;
-    //size_t tex_pitch;
-    //float h_tex_data[ img_dim*img_dim ];
-    //
-    //for( unsigned int i=0; i<aln_res.aln_cfg->sbj_num; i++ ){
-    //    float* d_tex_data = aln_res.sbj_batch->get_tex_data( &tex_pitch );
-    //    printf( "img2[%d]:\n", i );
-    //    CUDA_ERR_CHK( cudaMemcpy2D(h_tex_data, img_dim*sizeof(float),
-    //                  &d_tex_data[(tex_pitch/sizeof(float))*img_dim*i], tex_pitch,
-    //                  img_dim*sizeof(float), img_dim,
-    //                  cudaMemcpyDeviceToHost) );
-    //    for( unsigned int j=0; j<img_dim*img_dim; j++ ){
-    //        printf("%.6f ", h_tex_data[j]);
-    //    }
-    //    printf("\n");
-    //}
-    
-    //unsigned int img_dim = aln_res.aln_cfg->img_dim;
-    //size_t tex_pitch;
-    //float h_tex_data[ img_dim*img_dim ];
-    //
-    //for( unsigned int i=0; i<aln_res.aln_cfg->ref_num; i++ ){
-    //    float* d_tex_data = aln_res.ref_batch->get_tex_data( &tex_pitch );
-    //    printf( "img2[%d]:\n", i );
-    //    CUDA_ERR_CHK( cudaMemcpy2D(h_tex_data, img_dim*sizeof(float),
-    //                  &d_tex_data[(tex_pitch/sizeof(float))*img_dim*i], tex_pitch,
-    //                  img_dim*sizeof(float), img_dim,
-    //                  cudaMemcpyDeviceToHost) );
-    //    for( unsigned int j=0; j<img_dim*img_dim; j++ ){
-    //        printf("%.6f ", h_tex_data[j]);
-    //    }
-    //    printf("\n");
-    //}
-    
-    // update reference
     ref_batch->resample_to_polar( 0, 0, 0, aln_res.u_polar_sample_coords );
     ref_batch->apply_FFT();
 
@@ -437,11 +407,9 @@ extern "C" void mref_align_run( const int start_idx, const int stop_idx){
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
    
     sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
-     
-}
+    sbj_batch->apply_alignment_param( aln_res.u_aln_param, start_idx );  // NOTE: includes device sync at the end
 
-extern "C" int* get_num_ref(){
-    return aln_res.ref_batch->get_num_ref();
+    return sbj_batch->get_apply_ptr();
 }
 
 //-------------------------------------------------[ muti-refernce alignment ]
@@ -1011,7 +979,9 @@ __global__ void cu_ccf_mult_m(
     float*             batch_table_row_ptr, 
     const unsigned int batch_table_row_offset, 
     const unsigned int batch_table_mirror_offset,
-    const unsigned int ring_num)
+    const unsigned int ring_num,
+    const unsigned int ref_off,
+    const unsigned int ref_num)
 {
     /*
     This kernel is used to compute the cross correlation function of two images, which can be expressed
@@ -1077,56 +1047,65 @@ __global__ void cu_ccf_mult_m(
     // grid indices
     unsigned int bid = blockIdx.x;
     unsigned int tid = threadIdx.x;
-
-    // each block picks their image (NOTE: blockDim.x*2 == ring_len+2)
-    unsigned int sbj_idx = bid * blockDim.x*2*ring_num;  // img_index x img_size
-
-    float ccf_orig_r=0.0f, ccf_orig_i=0.0f, ccf_mirr_r=0.0f, ccf_mirr_i=0.0f;
+    unsigned int bid2 = blockIdx.y;
+    unsigned int tid2 = threadIdx.y;
     
-    for( unsigned int i=0; i<ring_num; i++ ){
-
-        // determine element offsets
-        unsigned int ref_elem_idx = i*blockDim.x*2 + tid*2;  // select element in reference image
-        unsigned int sbj_elem_idx = sbj_idx + ref_elem_idx;  // select element in subject image
-        // read out element data
-        float rr = ref_batch_ptr[ ref_elem_idx+0 ];  // ref elem real part
-        float ri = ref_batch_ptr[ ref_elem_idx+1 ];  // ref elem imag part
-        float sr = sbj_batch_ptr[ sbj_elem_idx+0 ];  // sbj elem real part
-        float si = sbj_batch_ptr[ sbj_elem_idx+1 ];  // sbj elem imag part
-        // tmps
-        float rr_sr = rr * sr;
-        float ri_si = ri * si;
-        float rr_si = rr * si;
-        float ri_sr = ri * sr;
-        // weighted ccf values (for original and mirrored sbj image)
-        ccf_orig_r += ( rr_sr+ri_si) * (i+1);
-        ccf_orig_i += (-rr_si+ri_sr) * (i+1);
-        ccf_mirr_r += ( rr_sr-ri_si) * (i+1);
-        ccf_mirr_i += (-rr_si-ri_sr) * (i+1);
+    unsigned int ref_idx =  tid2 + bid2*blockDim.y;
+    if(ref_idx < ref_num){
+        // each block picks their image (NOTE: blockDim.x*2 == ring_len+2)
+        unsigned int sbj_idx = bid * blockDim.x*2*ring_num;  // img_index x img_size
+        
+        float ccf_orig_r=0.0f, ccf_orig_i=0.0f, ccf_mirr_r=0.0f, ccf_mirr_i=0.0f;
+        
+        // each block picks their reference (NOTE: blockDim.x*2 == ring_len+2)
+        ref_batch_ptr = &ref_batch_ptr[ ref_idx * (blockDim.x*2)*ring_num ];
+        
+        for( unsigned int i=0; i<ring_num; i++ ){
+        
+            // determine element offsets
+            unsigned int ref_elem_idx = i*blockDim.x*2 + tid*2;  // select element in reference image
+            unsigned int sbj_elem_idx = sbj_idx + ref_elem_idx;  // select element in subject image
+            // read out element data
+            float rr = ref_batch_ptr[ ref_elem_idx+0 ];  // ref elem real part
+            float ri = ref_batch_ptr[ ref_elem_idx+1 ];  // ref elem imag part
+            float sr = sbj_batch_ptr[ sbj_elem_idx+0 ];  // sbj elem real part
+            float si = sbj_batch_ptr[ sbj_elem_idx+1 ];  // sbj elem imag part
+            // tmps
+            float rr_sr = rr * sr;
+            float ri_si = ri * si;
+            float rr_si = rr * si;
+            float ri_sr = ri * sr;
+            // weighted ccf values (for original and mirrored sbj image)
+            ccf_orig_r += ( rr_sr+ri_si) * (i+1);
+            ccf_orig_i += (-rr_si+ri_sr) * (i+1);
+            ccf_mirr_r += ( rr_sr-ri_si) * (i+1);
+            ccf_mirr_i += (-rr_si-ri_sr) * (i+1);
+        }
+        
+        // write results
+        unsigned int table_idx = blockIdx.x*batch_table_row_offset + tid*2;  // select row and elem_offset
+        //printf( "The address of table is %d..\n", table_idx);
+        batch_table_row_ptr = &batch_table_row_ptr[ ref_idx * ref_off ];
+        batch_table_row_ptr[ table_idx+0 ] = ccf_orig_r;
+        batch_table_row_ptr[ table_idx+1 ] = ccf_orig_i;
+        batch_table_row_ptr[ table_idx+batch_table_mirror_offset+0 ] = ccf_mirr_r;
+        batch_table_row_ptr[ table_idx+batch_table_mirror_offset+1 ] = ccf_mirr_i;
+        
+        /*
+        NOTE: We can get rid of the internal weight-multiplication and apply it instead to
+        the references as a pre-process. Here's why that should work:
+        
+        ccf_orig += (rr_sr+ri_si) * (i+1);
+                 += rr_sr*(i+1) + ri_si*(i+1);
+                 += (rr*sr)*(i+1) + (ri*si)*(i+1);
+                 += rr*(i+1)*sr + ri*(i+1)*si;)
+        
+        -> In each iteration the same constant (i+1) value it multiplied on the same constant
+           reference value. We can do that beforehand and avoid four multiplications per loop
+        
+        It does not safe that much time though. 
+        */
     }
-
-    // write results
-    unsigned int table_idx = blockIdx.x*batch_table_row_offset + tid*2;  // select row and elem_offset
-    //printf( "The address of table is %d..\n", table_idx);
-    batch_table_row_ptr[ table_idx+0 ] = ccf_orig_r;
-    batch_table_row_ptr[ table_idx+1 ] = ccf_orig_i;
-    batch_table_row_ptr[ table_idx+batch_table_mirror_offset+0 ] = ccf_mirr_r;
-    batch_table_row_ptr[ table_idx+batch_table_mirror_offset+1 ] = ccf_mirr_i;
-
-    /*
-    NOTE: We can get rid of the internal weight-multiplication and apply it instead to
-    the references as a pre-process. Here's why that should work:
-
-    ccf_orig += (rr_sr+ri_si) * (i+1);
-             += rr_sr*(i+1) + ri_si*(i+1);
-             += (rr*sr)*(i+1) + (ri*si)*(i+1);
-             += rr*(i+1)*sr + ri*(i+1)*si;)
-
-    -> In each iteration the same constant (i+1) value it multiplied on the same constant
-       reference value. We can do that beforehand and avoid four multiplications per loop
-
-    It does not safe that much time though. 
-    */
 }
 
 __global__ void cu_transform_batch( 
@@ -1536,11 +1515,13 @@ void BatchHandler::fetch_data(
     */
 
     // make sure we're not fetching more images than we can handle in our texture buffers
-    assert( img_limit <= img_tex_num*img_num_per_tex );
+    // assert( img_limit <= img_tex_num*img_num_per_tex );
 
     // update number of images stored after data fetch
     img_num = img_limit;
-
+    // update number of textures needed to store these image
+    img_tex_num     = (img_num%img_num_per_tex == 0) ? img_num/img_num_per_tex : img_num/img_num_per_tex + 1; 
+    
 
     // go fetch
     for( unsigned int tex_idx=0; tex_idx < img_tex_num; tex_idx++ ){
@@ -1663,19 +1644,25 @@ void BatchHandler::ccf_mult_m(
     //    printf("\n");
     //}
     // invoke cuda kernel to process the ccf multiplications, this will go through all the reference
-    //printf( "The image number is %d..\n", img_num);
-    for ( unsigned int j=0; j<ref_batch->img_num; j++ ){        
-        cu_ccf_mult_m<<< img_num, ccf_table->get_ring_len()/2+1 >>>(
-            d_img_data,                        // IN: take all our images and the selected reference
-            ref_batch->img_ptr(j),             // IN: ...
-            &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id, no used here
-            ccf_table->row_ptr(shift_idx, j),  // OUT: in-row offset for results of given shift and reference, reference 0~n
-            ccf_table->row_off(),              // CONST: offset to reach successive rows
-            ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
-            ring_num);                         // CONST: polar sampling parameters (ring length)
-        KERNEL_ERR_CHK();
-        CUDA_ERR_CHK( cudaDeviceSynchronize() );
-    }
+    //printf( "The  ring_len is %d, ring_num is %d, size of float is %d", ccf_table->get_ring_len(), ring_num, sizeof(float));
+    //for ( unsigned int j=0; j<ref_batch->img_num; j++ ){    
+    dim3 block = {ccf_table->get_ring_len()/2+1, 4, 1};
+    dim3 grid = {img_num, (ref_batch->img_num+block.y-1)/block.y, 1};
+
+    
+     cu_ccf_mult_m<<< grid, block>>>(
+         d_img_data,                        // IN: take all our images and the selected reference
+         ref_batch->img_ptr(0),             // IN: ...
+         &aln_res.u_aln_param[data_idx],    // IN: sbj_cid in form of aln_param[i].ref_id, no used here
+         ccf_table->row_ptr(shift_idx, 0),  // OUT: in-row offset for results of given shift and reference, reference 0~n
+         ccf_table->row_off(),              // CONST: offset to reach successive rows
+         ccf_table->mirror_off(),           // CONST: in-row offset for mirrored results
+         ring_num,
+         ccf_table->ref_off(),
+         ref_batch->img_num );                         // CONST: polar sampling parameters (ring length)
+     KERNEL_ERR_CHK();
+     CUDA_ERR_CHK( cudaDeviceSynchronize() );
+    //}
 }
 
 
@@ -1685,16 +1672,16 @@ void BatchHandler::apply_alignment_param( AlignParam* aln_param , unsigned int s
     
     unsigned int img_storage_idx=0;
     for( unsigned int i=0; i<img_tex_num; i++ ){
-        unsigned int tmp_img_num;
-        if(i*img_num_per_tex > img_num ){
-            break;
-        }
-        if((i+1)*img_num_per_tex > img_num ){
-            tmp_img_num = img_num - i*img_num_per_tex;
-        }else{
-            tmp_img_num = img_num_per_tex;
-        }
-        //unsigned int tmp_img_num = (i!=img_tex_num-1) ? img_num_per_tex : img_num - i*img_num_per_tex;
+        // unsigned int tmp_img_num;
+        // if(i*img_num_per_tex > img_num ){
+        //     break;
+        // }
+        // if((i+1)*img_num_per_tex > img_num ){
+        //     tmp_img_num = img_num - i*img_num_per_tex;
+        // }else{
+        //     tmp_img_num = img_num_per_tex;
+        // }
+        unsigned int tmp_img_num = (i!=img_tex_num-1) ? img_num_per_tex : img_num - i*img_num_per_tex;
         //printf(" img_num%u, tmp_img_num %u, img_dim_x%u, img_num_per_tex%u ", img_num, tmp_img_num, img_dim_x, img_num_per_tex);
         cu_transform_batch<<< tmp_img_num, img_dim_x >>>(
             img_tex_obj[i],

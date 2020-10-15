@@ -79,11 +79,15 @@ extern "C" void pre_align_fetch(
 
 
 extern "C" void pre_align_run( const int start_idx, const int stop_idx );
-extern "C" void mref_align_run( const int start_idx, const int stop_idx );
+extern "C" void* mref_align_run( const int start_idx, const int stop_idx );
 extern "C" float* mref_align_run_m( const int start_idx, const int stop_idx );
 
 
-
+//------------------------------------------------------------[ Don't be silly ]
+extern "C" float* get_ccf_table_ptr();
+extern "C" int* get_ccf_result_ptr();
+extern "C" float* mref_align_run_m_p2( const int start_idx, const int stop_idx);
+extern "C" void mref_align_run_m_p1( const int start_idx, const int stop_idx);
 //-------------------------------------------------[ reference-free alignment ]
 
 extern "C" AlignParam* ref_free_alignment_2D_init( 
@@ -160,6 +164,13 @@ class CcfResultTable{
             const unsigned int            param_limit,
             const vector<array<float,2>>* shifts,
             AlignParam*                   aln_param );
+        void compute_alignment_param_remove_silly( 
+            const unsigned int            param_idx,
+            const unsigned int            param_limit,
+            const vector<array<float,2>>* shifts,
+            AlignParam*                   aln_param );
+        float* get_u_ccf_batch_table_ptr(){return u_ccf_batch_table;}
+        int* get_u_max_idx_ptr(){return u_max_idx;}
 };
 
 //=======================================================[ BatchHandler class ]
@@ -228,7 +239,11 @@ class BatchHandler{
             const unsigned int          param_limit,
             const vector<array<float,2>>* shifts,
             AlignParam*                 aln_param );
-        void apply_alignment_param( AlignParam* aln_param, unsigned int start_idx );
+        void compute_alignment_param_remove_silly(
+            const unsigned int          param_idx,
+            const unsigned int          param_limit,
+            const vector<array<float,2>>* shifts,
+            AlignParam*                 aln_param );        void apply_alignment_param( AlignParam* aln_param, unsigned int start_idx );
         void fetch_averages( float* img_data );
         void fetch_averages_m( float* img_data , unsigned int sbj_img_num, unsigned int start);
         void return_averages();

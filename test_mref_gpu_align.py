@@ -77,7 +77,7 @@ import ctypes
 from EMAN2 import EMNumPy
 from cupy.cuda.nvtx import RangePush, RangePushC, RangePop
 
-CUDA_PATH = os.path.join(os.path.dirname(__file__),  "cuda3", "")
+CUDA_PATH = os.path.join(os.path.dirname(__file__),  "cuda", "")
 cu_module = ctypes.CDLL( CUDA_PATH + "gpu_aln_pack.so" )
 float_ptr = ctypes.POINTER(ctypes.c_float)
 
@@ -579,22 +579,22 @@ def mref_ali2d_gpu(
     RangePush("disk")
     # write out headers  and STOP, under MPI writing has to be done sequentially (time-consumming)
     mpi_barrier(mpi_comm)
-    #if CTF and data_had_ctf == 0:
-    #    for im in range(nima): data[im].set_attr('ctf_applied', 0)
-    #par_str = ['xform.align2d', 'assign', 'ID']
-    #if myid == main_node:
-    #    from sp_utilities import file_type
-    #    if(file_type(filename) == "bdb"):
-    #        from sp_utilities import recv_attr_dict_bdb
-    #        recv_attr_dict_bdb(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
-    #    else:
-    #        from sp_utilities import recv_attr_dict
-    #        recv_attr_dict(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
-    #else:           send_attr_dict(main_node, data, par_str, image_start, image_end)
-        
-    # free gpu resources
-    cu_module.gpu_clear()
-    mpi.mpi_barrier(mpi_comm)
+#    if CTF and data_had_ctf == 0:
+#        for im in range(nima): data[im].set_attr('ctf_applied', 0)
+#    par_str = ['xform.align2d', 'assign', 'ID']
+#    if myid == main_node:
+#        from sp_utilities import file_type
+#        if(file_type(filename) == "bdb"):
+#            from sp_utilities import recv_attr_dict_bdb
+#            recv_attr_dict_bdb(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
+#        else:
+#            from sp_utilities import recv_attr_dict
+#            recv_attr_dict(main_node, filename, data, par_str, image_start, image_end, number_of_proc)
+#    else:           send_attr_dict(main_node, data, par_str, image_start, image_end)
+#        
+#    # free gpu resources
+#    cu_module.gpu_clear()
+#    mpi.mpi_barrier(mpi_comm)
     RangePop()
     
     if myid == main_node:

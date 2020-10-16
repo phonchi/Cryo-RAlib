@@ -166,15 +166,15 @@ class CudaStreamPool{
 
 //====================================================================[ other ]
 
-__device__ void cu_max_idx_op(
-    const unsigned int i,
-    const unsigned int off,
-    float*             shared_data,
-    unsigned int*      shared_idx );
-
-__global__ void cu_max_idx_batch(
-    const float*  data,
-    unsigned int  len,
-    unsigned int* idx );
+//__device__ void cu_max_idx_op(
+//    const unsigned int i,
+//    const unsigned int off,
+//    float*             shared_data,
+//    unsigned int*      shared_idx );
+//
+//__global__ void cu_max_idx_batch(
+//    const float*  data,
+//    unsigned int  len,
+//    unsigned int* idx );
 
 #endif

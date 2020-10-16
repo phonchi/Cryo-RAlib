@@ -329,59 +329,59 @@ void CudaStreamPool::synchronize() const {
 }
 
 
-//====================================================================[ other ]
-
-/*
-The following is an efficient segmented reduction to find idx of max values 
-given a 2D-layout array. However, since we would apply this function to arrays
-of substantial size, it is acutally faster to simply go with cublasIsamax()
-calls instead.
-
-   This means both cu_max_idx_op() and cu_max_idx_batch() are not used and
-could be removed. I'm keeping them here, however, in case we need them, or
-something similar, in the future.
-*/
-
-// max operation: find max val and max idx between two the values at [i] and [i+off]
-__device__ void cu_max_idx_op( const unsigned int i, const unsigned int off, float* shared_data, unsigned int* shared_idx ){
-    /*   DATA SEGMENT          INDEX SEGMENT
-        |=x========:=x========|-x--------:-x--------|    - shared memory array has two parts (':' marks halfway within each segment)
-          |__________|          |__________|             - value of <off> is depicted as range of |__________|
-          |                     |                        - index half starts at <i+offx2>
-          |          ___________|                        - No. of threads == value of <off>
-          v          v                                   - NOTE: shared_data and shared_idx are the same address!
-        |=x========|-x--------|
-          ^          ^          ^          ^
-         [i]        [i+off]    [i+off*2]  [i+off*3]
-    */
-    shared_data[i]     = (shared_data[i] > shared_data[i+off]) ? shared_data[i]       : shared_data[i+off];    // val update
-    shared_idx [i+off] = (shared_data[i] > shared_data[i+off]) ? shared_idx [i+off*2] : shared_idx [i+off*3];  // idx update
-}
-
-// batch-wise max_idx reduction: each block finds the max val and its idx within a range of size <len> within a continuous data array
-__global__ void cu_max_idx_batch( const float* data, unsigned int len, unsigned int* idx ){
-    /*
-    Based on: https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
-    */
-    // shared memory
-    extern __shared__ float        shared_data[];
-    extern __shared__ unsigned int shared_idx [];
-    // grid id and data pointer
-    unsigned int tid = threadIdx.x;
-    unsigned int data_idx = blockIdx.x * len + tid;
-    // load data into shared memory (first half stores values, second half stores value indices in the original array)
-    unsigned int off = blockDim.x;
-    shared_data[tid]     = (data[data_idx] > data[data_idx+off]) ? data[data_idx] : data[data_idx+off];
-    shared_idx [tid+off] = (data[data_idx] > data[data_idx+off]) ? tid : tid+off;
-    __syncthreads();
-    // unrolled reduction (syncthreads only needed above warp size)
-    if(tid < 64) cu_max_idx_op(tid, 64, shared_data, shared_idx); __syncthreads();
-    if(tid < 32) cu_max_idx_op(tid, 32, shared_data, shared_idx);
-    if(tid < 16) cu_max_idx_op(tid, 16, shared_data, shared_idx);
-    if(tid <  8) cu_max_idx_op(tid,  8, shared_data, shared_idx);
-    if(tid <  4) cu_max_idx_op(tid,  4, shared_data, shared_idx);
-    if(tid <  2) cu_max_idx_op(tid,  2, shared_data, shared_idx);
-    if(tid <  1) cu_max_idx_op(tid,  1, shared_data, shared_idx);
-    // shared_idx[0] holds the max value; shared_idx[1] holds the index of the max in the original array
-    if(tid == 0) idx[blockIdx.x] = shared_idx[1];
-}
+////====================================================================[ other ]
+//
+///*
+//The following is an efficient segmented reduction to find idx of max values 
+//given a 2D-layout array. However, since we would apply this function to arrays
+//of substantial size, it is acutally faster to simply go with cublasIsamax()
+//calls instead.
+//
+//   This means both cu_max_idx_op() and cu_max_idx_batch() are not used and
+//could be removed. I'm keeping them here, however, in case we need them, or
+//something similar, in the future.
+//*/
+//
+//// max operation: find max val and max idx between two the values at [i] and [i+off]
+//__device__ void cu_max_idx_op( const unsigned int i, const unsigned int off, float* shared_data, unsigned int* shared_idx ){
+//    /*   DATA SEGMENT          INDEX SEGMENT
+//        |=x========:=x========|-x--------:-x--------|    - shared memory array has two parts (':' marks halfway within each segment)
+//          |__________|          |__________|             - value of <off> is depicted as range of |__________|
+//          |                     |                        - index half starts at <i+offx2>
+//          |          ___________|                        - No. of threads == value of <off>
+//          v          v                                   - NOTE: shared_data and shared_idx are the same address!
+//        |=x========|-x--------|
+//          ^          ^          ^          ^
+//         [i]        [i+off]    [i+off*2]  [i+off*3]
+//    */
+//    shared_data[i]     = (shared_data[i] > shared_data[i+off]) ? shared_data[i]       : shared_data[i+off];    // val update
+//    shared_idx [i+off] = (shared_data[i] > shared_data[i+off]) ? shared_idx [i+off*2] : shared_idx [i+off*3];  // idx update
+//}
+//
+//// batch-wise max_idx reduction: each block finds the max val and its idx within a range of size <len> within a continuous data array
+//__global__ void cu_max_idx_batch( const float* data, unsigned int len, unsigned int* idx ){
+//    /*
+//    Based on: https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
+//    */
+//    // shared memory
+//    extern __shared__ float        shared_data[];
+//    extern __shared__ unsigned int shared_idx [];
+//    // grid id and data pointer
+//    unsigned int tid = threadIdx.x;
+//    unsigned int data_idx = blockIdx.x * len + tid;
+//    // load data into shared memory (first half stores values, second half stores value indices in the original array)
+//    unsigned int off = blockDim.x;
+//    shared_data[tid]     = (data[data_idx] > data[data_idx+off]) ? data[data_idx] : data[data_idx+off];
+//    shared_idx [tid+off] = (data[data_idx] > data[data_idx+off]) ? tid : tid+off;
+//    __syncthreads();
+//    // unrolled reduction (syncthreads only needed above warp size)
+//    if(tid < 64) cu_max_idx_op(tid, 64, shared_data, shared_idx); __syncthreads();
+//    if(tid < 32) cu_max_idx_op(tid, 32, shared_data, shared_idx);
+//    if(tid < 16) cu_max_idx_op(tid, 16, shared_data, shared_idx);
+//    if(tid <  8) cu_max_idx_op(tid,  8, shared_data, shared_idx);
+//    if(tid <  4) cu_max_idx_op(tid,  4, shared_data, shared_idx);
+//    if(tid <  2) cu_max_idx_op(tid,  2, shared_data, shared_idx);
+//    if(tid <  1) cu_max_idx_op(tid,  1, shared_data, shared_idx);
+//    // shared_idx[0] holds the max value; shared_idx[1] holds the index of the max in the original array
+//    if(tid == 0) idx[blockIdx.x] = shared_idx[1];
+//}

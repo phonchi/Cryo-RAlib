@@ -257,8 +257,10 @@ extern "C" bool pre_align_size_check(
     size_t globals = (polar_template + shift_array + aln_param + cid_idx) / (1024*1024);
     if(verbose) printf( "  in/out param:   %zuMB\n", globals );
 
+    //****************************************************************************************
     // * NOTE: In pre-alignment the length of the aln_param list is constant (num_particles,
     //  to be precise) and we only vary the batch size of particles processed on the GPU.
+    //****************************************************************************************
 
     //------------------------------------------------[ subject batch handler ]
 
@@ -346,6 +348,7 @@ extern "C" bool pre_align_size_check(
         return false;
 }
 
+// This is a utility fuction that can print data from d_image_data not texture data
 void print_data( const float** img_data, const unsigned int img_num, const unsigned int img_dim ){
     for(int i=0; i<img_num; i++){
         printf( "img[%d]:\n", i );
@@ -382,7 +385,7 @@ extern "C" int* get_num_ref(){
     return aln_res.ref_batch->get_num_ref();
 }
 
-
+//-------------------------------------------------[ muti-refernce alignment ]
 extern "C" void* mref_align_run( const int start_idx, const int stop_idx){
 
     //----------------------------------------------------------------[ setup ]
@@ -406,13 +409,13 @@ extern "C" void* mref_align_run( const int start_idx, const int stop_idx){
     sbj_batch->apply_IFFT();
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
    
-    sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
+    sbj_batch->compute_alignment_param_m( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
     sbj_batch->apply_alignment_param( aln_res.u_aln_param, start_idx );  // NOTE: includes device sync at the end
 
     return sbj_batch->get_apply_ptr();
 }
 
-//-------------------------------------------------[ muti-refernce alignment ]
+
 extern "C" float* mref_align_run_m( const int start_idx, const int stop_idx){
 
     //----------------------------------------------------------------[ setup ]
@@ -1058,7 +1061,7 @@ __global__ void cu_ccf_mult_m(
         float ccf_orig_r=0.0f, ccf_orig_i=0.0f, ccf_mirr_r=0.0f, ccf_mirr_i=0.0f;
         
         // each block picks their reference (NOTE: blockDim.x*2 == ring_len+2)
-        ref_batch_ptr = &ref_batch_ptr[ ref_idx * (blockDim.x*2)*ring_num ];
+        ref_batch_ptr = &ref_batch_ptr[ ref_idx * (blockDim.x*2)*ring_num ]; //Read from the correct reference address
         
         for( unsigned int i=0; i<ring_num; i++ ){
         
@@ -1085,7 +1088,7 @@ __global__ void cu_ccf_mult_m(
         // write results
         unsigned int table_idx = blockIdx.x*batch_table_row_offset + tid*2;  // select row and elem_offset
         //printf( "The address of table is %d..\n", table_idx);
-        batch_table_row_ptr = &batch_table_row_ptr[ ref_idx * ref_off ];
+        batch_table_row_ptr = &batch_table_row_ptr[ ref_idx * ref_off ]; //write to the correct reference address
         batch_table_row_ptr[ table_idx+0 ] = ccf_orig_r;
         batch_table_row_ptr[ table_idx+1 ] = ccf_orig_i;
         batch_table_row_ptr[ table_idx+batch_table_mirror_offset+0 ] = ccf_mirr_r;
@@ -1131,7 +1134,7 @@ __global__ void cu_transform_batch(
     for( unsigned int img_coord_y=0; img_coord_y<img_dim_y; img_coord_y++ ){
 
         // mirror
-        src_coord_x = (u_aln_param[start_idx+img_idx].mirror) ? blockDim.x - img_coord_x : img_coord_x;
+        src_coord_x = (u_aln_param[start_idx+img_idx].mirror) ? blockDim.x - img_coord_x : img_coord_x; //Note we need to add start_idx here
         src_coord_y = img_coord_y;
 
         // rotation
@@ -1194,6 +1197,7 @@ __global__ void cu_average_batch(
     }
 }
 
+// A slow average method for multireference alignment results, it is faster using CuPy sum instead 
 __global__ void cu_average_batch_m( 
     const float*        img_storage,     // take this buffer holding a bunch of images
     const unsigned int  img_dim_y,       // each of which has this y-dim
@@ -1237,6 +1241,79 @@ __global__ void cu_average_batch_m(
         num_ref[ref_idx] = count;
     }
 }
+
+//====================================================================[ other ]
+
+/*
+The following is an efficient segmented reduction to find idx of max values 
+given a 2D-layout array. However, since we would apply this function to arrays
+of substantial size, it is acutally faster to simply go with cublasIsamax()
+calls instead.
+
+The Thrust or Cub routine may also be faster. Howerver, currentlt this is not the time consumming part, we leave it 
+as it is. 
+*/
+
+// max operation: find max val and max idx between two the values at [i] and [i+off]
+__device__ void cu_max_idx_op( const unsigned int i, const unsigned int off, float* shared_data, unsigned int* shared_idx ){
+    /*   DATA SEGMENT          INDEX SEGMENT
+        |=x========:=x========|-x--------:-x--------|    - shared memory array has two parts (':' marks halfway within each segment)
+          |__________|          |__________|             - value of <off> is depicted as range of |__________|
+          |                     |                        - index half starts at <i+offx2>
+          |          ___________|                        - No. of threads == value of <off>
+          v          v                                   - NOTE: shared_data and shared_idx are the same address!
+        |=x========|-x--------|
+          ^          ^          ^          ^
+         [i]        [i+off]    [i+off*2]  [i+off*3]
+    */
+    shared_data[i]     = (shared_data[i] > shared_data[i+off]) ? shared_data[i]       : shared_data[i+off];    // val update
+    shared_idx [i+off] = (shared_data[i] > shared_data[i+off]) ? shared_idx[i+off*2] : shared_idx[i+off*3];  // idx update
+}
+
+// batch-wise max_idx reduction: each block finds the max val and its idx within a range of size <len> within a continuous data array
+__global__ void cu_max_idx_batch( const float* data, unsigned int len, int* idx ){
+    /*
+    Based on: https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
+    */
+    // shared memory
+    extern __shared__ float        shared_data[];//Note we build two share memory here by specifying enough size when calling this routine
+    extern __shared__ unsigned int shared_idx [];
+    // grid id and data pointer
+    unsigned int tid = threadIdx.x;
+    unsigned int data_idx = blockIdx.x * len + tid;
+    // load data into shared memory (first half stores values, second half stores value indices in the original array)
+    unsigned int off = blockDim.x;
+    unsigned int i = tid;
+    shared_data[tid] = data[data_idx];
+    shared_idx [tid+off] = i;
+    __syncthreads();
+    // initialize
+    while(i < len){
+        if (data[data_idx] > shared_data[tid]){
+            shared_data[tid]  = data[data_idx];
+            shared_idx [tid+off] = i;
+        }
+        else{
+            shared_data[tid]  = shared_data[tid];
+            shared_idx [tid+off] = shared_idx [tid+off];
+        }
+        data_idx += off;
+        i += off;
+    }
+    __syncthreads();
+    //printf(" %d", shared_idx [tid+off]);
+    // unrolled reduction (syncthreads only needed above warp size)
+    if(tid < 64) cu_max_idx_op(tid, 64, shared_data, shared_idx); __syncthreads();
+    if(tid < 32) cu_max_idx_op(tid, 32, shared_data, shared_idx); 
+    if(tid < 16) cu_max_idx_op(tid, 16, shared_data, shared_idx);
+    if(tid <  8) cu_max_idx_op(tid,  8, shared_data, shared_idx);
+    if(tid <  4) cu_max_idx_op(tid,  4, shared_data, shared_idx);
+    if(tid <  2) cu_max_idx_op(tid,  2, shared_data, shared_idx);
+    if(tid <  1) cu_max_idx_op(tid,  1, shared_data, shared_idx);
+    // shared_idx[0] holds the max value; shared_idx[1] holds the index of the max in the original array
+    if(tid == 0) idx[blockIdx.x] = shared_idx[1];
+}
+
 
 
 __global__ void cu_max_idx_silly(
@@ -1282,6 +1359,111 @@ __global__ void cu_max_idx_silly(
     }
 }
 
+__device__ void cu_interpolate_angle(
+    const unsigned int sbj_idx,
+    const unsigned int max_idx,
+    const unsigned int max_idx_off ,
+    const unsigned int row_off, 
+    const unsigned int ref_off,
+    const float* u_ccf_batch_table,
+    const unsigned int ring_len,
+    float* angle)
+{
+    /*
+    ccf table:
+    sbj_idx-1:  .. [----][----][----]..
+    sbj_idx     .. [----][--x-][----]..  <-- x marks the peak value found at ccf_table[ sbj_idx*row_off() + max_idx ]
+    sbj_idx+1:  .. [----][----][----]..
+                               \____/_______ Each [----] block holds the ccf results for all angles given a specific reference
+    Args:                                                                                                            and shift
+        unsigned int sbj_idx: Index of the sbj image that we're rotating atm. Used to find the 
+            correct row in the ccf results table.
+
+        unsigned int max_idx: Index of the maximum within the sbj row (within [0,row_off]).
+
+        unsigned int max_idx_off: Offset of the <max_idx> value from the beginning of its ccf-
+            result block:             __ _______________
+                                     |  |               \___ <max_idx_off> (within [0,ring_len+2])
+            row[ sbj_idx ]: .. [----][--x-][----]..
+    */
+
+    // collect cross reference values around peak angle
+    double x[7];
+    for( int i=-3; i<=3; i++ ){
+
+        unsigned int base = 0;                  // pointer to beginning of the ccf result that contains the peak value, like so:
+        base += sbj_idx*row_off;              // select the row for the subject in question
+        base += (max_idx/ref_off)*ref_off;  // select the result; <max_idx_off> is now the offset from <base> to the peak angle
+
+        x[i+3] = u_ccf_batch_table[ base + (max_idx_off+i)%ring_len ];  // NOTE: not (ring_len+2) !
+    }
+
+    // fit parabola to the collected values and find the location of the parabola's peak
+    // NOTE: parabolic fit adapted from the sparx Util::prb1d() function
+    double c2 =  49.*x[0] + 6.*x[1] - 21.*x[2] - 32.*x[3] - 27.*x[4] - 6.*x[5] + 31.*x[6];
+    double c3 =   5.*x[0] - 3.*x[2] -  4.*x[3] -  3.*x[4] +  5.*x[6];
+
+    // interpolate the angle in between the discrete angular steps of the alignment search
+    double angle_step = (360.0/(double)(ring_len));
+    *angle = angle_step * (double)(max_idx_off);  // NOTE: this would be our estimated angle w/o interpolation
+
+    if( c3 != 0.0 )
+        *angle = *angle + angle_step*( c2 / (2.0*c3) - 4 );  // term in brackets is the interpolation factor
+    //else
+    //    return angle;
+}
+
+// This is a routine to reverse engineer alignment parameters for sbj_i given max idx value within data row_i
+__global__ void cu_find_params(
+    const unsigned int            param_idx,
+    const unsigned int            param_limit,
+    const float* shifts,
+    AlignParam*                   aln_param, 
+    const unsigned int mirror_off,
+    const unsigned int shift_off,
+    const unsigned int ref_off,
+    const unsigned int row_off,
+    const unsigned int ring_len,
+    const float* u_ccf_batch_table, 
+    const int* u_max_idx,
+    float shift_limit
+    )
+{
+    unsigned int bid = blockIdx.x;
+    //unsigned int tid = threadIdx.x;
+
+    
+    // did we run out of data? (this only happens once at the very end)
+    if( param_idx + bid < param_limit ){
+        // next parameter set
+        AlignParam* tmp_param = &aln_param[param_idx + bid];
+        int idx = u_max_idx[bid];
+        // mirror flag
+        if( idx >= mirror_off ){ tmp_param->mirror = true; idx -= mirror_off; }
+        else tmp_param->mirror = false;
+        // shifts
+        tmp_param->shift_x += shifts[idx/shift_off*2];
+        tmp_param->shift_y += shifts[idx/shift_off*2+1];
+        tmp_param->shift_x  = min(max(tmp_param->shift_x, -shift_limit), shift_limit);
+        tmp_param->shift_y  = min(max(tmp_param->shift_y, -shift_limit), shift_limit);
+        idx -= shift_off*(idx/shift_off);
+        // ref img id
+        int ref_id = idx/ref_off;
+        tmp_param->ref_id = ref_id;
+        idx -= ref_id*ref_off;
+        // rotation angle (interpolated & adjusted for EMAN2 compatibility)
+        cu_interpolate_angle( bid, u_max_idx[bid], idx , row_off, ref_off, u_ccf_batch_table, ring_len, &tmp_param->angle);
+        tmp_param->angle = 360.0 - tmp_param->angle; 
+        if( tmp_param->mirror ){
+            tmp_param->angle += 180.0;
+            if( tmp_param->angle >= 360.0 )
+                tmp_param->angle -= 360.0;
+        }
+    }
+}
+
+
+
 //=======================================================[ BatchHandler class ]
 
 BatchHandler::BatchHandler( const AlignConfig* batch_cfg, const char* batch_type ){
@@ -1307,7 +1489,9 @@ BatchHandler::BatchHandler( const AlignConfig* batch_cfg, const char* batch_type
 
     img_num_per_tex = cu_dev_prop.maxTexture2DLinear[1] / img_dim_x;  // max. 2D texture height in linear memory by img_dim_x
     img_tex_num     = (img_num%img_num_per_tex == 0) ? img_num/img_num_per_tex : img_num/img_num_per_tex + 1;  // number of texture objects
-    printf("begin img_tex_num %u, img_num_per_tex%u, img_num%u \n", img_tex_num, img_num_per_tex, img_num);
+
+    //We allocate two times more texture memory for reference batch here in order to return even and odd averages, this is no use in the CuPy version
+    //printf("begin img_tex_num %u, img_num_per_tex%u, img_num%u \n", img_tex_num, img_num_per_tex, img_num);
     if( strcmp(batch_type, "pre_align_ref_batch")==0){
         img_tex_obj     = (cudaTextureObject_t*)malloc( img_tex_num*2*sizeof(cudaTextureObject_t) );                 // array of texture objects
         CUDA_ERR_CHK( cudaMallocManaged(&u_img_tex_data, (img_tex_num*2)*sizeof(float*)) );
@@ -1621,7 +1805,7 @@ void BatchHandler::ccf_mult(
     KERNEL_ERR_CHK();
 }
 
-
+// This is multirefernce version of cross correlation computation
 void BatchHandler::ccf_mult_m(
     const BatchHandler* ref_batch,
     const unsigned int  shift_idx,
@@ -1732,6 +1916,7 @@ void BatchHandler::fetch_averages_m( float* img_data , unsigned int sbj_img_num,
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
 }
 
+//Copy from texture memory to host data
 void BatchHandler::return_averages(){
 
     /* WARNING: This assumes that all references fit into a single texture! */
@@ -1817,6 +2002,17 @@ void BatchHandler::apply_tangent_filter( const float cutoff_freq, const float fa
     // this can catch errors that fall through otherwise, so better safe than sorry here
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
 }
+
+
+void BatchHandler::compute_alignment_param_m( 
+    const unsigned int            param_idx, 
+    const unsigned int            param_limit, 
+    const vector<array<float,2>>* shifts,
+    AlignParam*                   aln_param )
+{
+    ccf_table->compute_alignment_param_m( param_idx, param_limit, shifts, aln_param );
+}
+
 
 void BatchHandler::compute_alignment_param( 
     const unsigned int            param_idx, 
@@ -1978,6 +2174,47 @@ void CcfResultTable::apply_IFFT(){
     CUDA_ERR_CHK ( cudaDeviceSynchronize() );
 }
 
+
+void CcfResultTable::compute_alignment_param_m(
+    const unsigned int            param_idx,
+    const unsigned int            param_limit,
+    const vector<array<float,2>>* shifts,
+    AlignParam*                   aln_param )
+{
+    // prep
+    
+    
+    //printf( "shift_off is  %d", shift_off() );
+    //printf( ", ref_off is  %d", ref_off() );
+    //printf( ", row_off is  %d", row_off() );
+    //printf( ", mirror_off is  %d", mirror_off() );
+    //printf( ", entry_num is  %d", entry_num() );
+    //printf( ", get_ring_num is  %d", get_ring_num() );
+    //printf( ", get_ring_len is  %d\n", get_ring_len() );
+    //for( unsigned int j=0; j<row_num(); j++ ){
+    //    printf("%d th row are: ", j);
+    //    for( unsigned int i=0; i<row_off(); i++ ){
+    //        printf("%f ", u_ccf_batch_table[j*row_off()+i]);
+    //    }
+    //    printf("\n\n");
+    //}
+    // step 01: compute idx of max within each row of the ccf table
+    compute_max_indices_m();
+
+
+    float* u_shift=NULL;
+    CUDA_ERR_CHK( cudaMallocManaged(&u_shift, aln_res.shifts->size()*sizeof(float)*2) );
+    for (unsigned int shift_idx=0; shift_idx < aln_res.shifts->size(); shift_idx++) {
+        cudaMemcpy(&u_shift[shift_idx*2], &(*shifts)[shift_idx][0], sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(&u_shift[shift_idx*2+1], &(*shifts)[shift_idx][1], sizeof(float), cudaMemcpyHostToDevice);
+    }
+    //for (unsigned int shift_idx=0; shift_idx < aln_res.shifts->size()*2; shift_idx++) {
+    //    printf(" %f", u_shift[shift_idx]);
+    //}
+    // step 02: reverse engineer alignment parameters for sbj_i given max idx value within data row_i
+    find_params(param_idx, param_limit, u_shift, aln_param);
+}
+
 void CcfResultTable::compute_alignment_param(
     const unsigned int            param_idx,
     const unsigned int            param_limit,
@@ -2002,8 +2239,18 @@ void CcfResultTable::compute_alignment_param(
     //    printf("\n\n");
     //}
     // step 01: compute idx of max within each row of the ccf table
-    compute_max_indices();
+    compute_max_indices_m();
 
+
+    float* u_shift=NULL;
+    CUDA_ERR_CHK( cudaMallocManaged(&u_shift, aln_res.shifts->size()*sizeof(float)*2) );
+    for (unsigned int shift_idx=0; shift_idx < aln_res.shifts->size(); shift_idx++) {
+        cudaMemcpy(&u_shift[shift_idx*2], &(*shifts)[shift_idx][0], sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(&u_shift[shift_idx*2+1], &(*shifts)[shift_idx][1], sizeof(float), cudaMemcpyHostToDevice);
+    }
+    //for (unsigned int shift_idx=0; shift_idx < aln_res.shifts->size()*2; shift_idx++) {
+    //    printf(" %f", u_shift[shift_idx]);
+    //}
     // step 02: reverse engineer alignment parameters for sbj_i given max idx value within data row_i
     for( unsigned int i=0; i<sbj_num; i++ ){
         // did we run out of data? (this only happens once at the very end)
@@ -2037,11 +2284,38 @@ void CcfResultTable::compute_alignment_param(
 
 //-----------------------------------------------------------------[ privates ]
 
+void CcfResultTable::find_params(
+    const unsigned int            param_idx,
+    const unsigned int            param_limit,
+    const float* u_shift,
+    AlignParam*                   aln_param) 
+{
+    float shift_limit = aln_res.aln_cfg->img_dim - aln_res.aln_cfg->ring_num - 2;
+    //unsigned int threads = 128;
+    cu_find_params<<< sbj_num, 1>>>( param_idx, param_limit, u_shift, aln_param , mirror_off(), shift_off(), ref_off(), row_off(), ring_len, u_ccf_batch_table, u_max_idx, shift_limit);
+    KERNEL_ERR_CHK();
+    CUDA_ERR_CHK( cudaDeviceSynchronize() );
+}
+
+
+void CcfResultTable::compute_max_indices_m() {
+    unsigned int threads = 128;
+    cu_max_idx_batch<<< sbj_num, threads, (threads*sizeof(float)+threads*sizeof(unsigned int)) >>>( u_ccf_batch_table, row_off(), u_max_idx );
+    KERNEL_ERR_CHK();
+    CUDA_ERR_CHK( cudaDeviceSynchronize() );
+    //for( unsigned int i=0; i<sbj_num; i++ )
+        //printf("%d ", u_max_idx[i]);
+}
+
+
 void CcfResultTable::compute_max_indices() {
     unsigned int threads = 128;
     cu_max_idx_silly<<< sbj_num, threads, (threads*sizeof(float)+threads*sizeof(unsigned int)) >>>( u_ccf_batch_table, row_off(), u_max_idx );
+
     KERNEL_ERR_CHK();
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
+    //for( unsigned int i=0; i<sbj_num; i++ )
+        //printf("%d ", u_max_idx[i]);
 }
 
 double CcfResultTable::interpolate_angle(

@@ -133,10 +133,8 @@ class CcfResultTable{
         cufftHandle cufft_pln;      // CUDA plan for the IFFT
 
         void  compute_max_indices();
-        double interpolate_angle( 
-            const unsigned int sbj_idx,
-            const unsigned int max_idx,
-            const unsigned int max_idx_off );
+        void  compute_max_indices_m();
+
 
     public:
         CcfResultTable( const AlignConfig* batch_cfg );
@@ -158,8 +156,22 @@ class CcfResultTable{
         inline size_t memsize() const;  // batch table size in bytes
         
         void apply_IFFT();
-
+    
+        double interpolate_angle( 
+            const unsigned int sbj_idx,
+            const unsigned int max_idx,
+            const unsigned int max_idx_off );
+        void find_params(
+            const unsigned int            param_idx,
+            const unsigned int            param_limit,
+            const float* u_shift,
+            AlignParam*                   aln_param);
         void compute_alignment_param( 
+            const unsigned int            param_idx,
+            const unsigned int            param_limit,
+            const vector<array<float,2>>* shifts,
+            AlignParam*                   aln_param );
+        void compute_alignment_param_m(
             const unsigned int            param_idx,
             const unsigned int            param_limit,
             const vector<array<float,2>>* shifts,
@@ -235,6 +247,11 @@ class BatchHandler{
         void apply_IFFT();
 
         void compute_alignment_param(
+            const unsigned int          param_idx,
+            const unsigned int          param_limit,
+            const vector<array<float,2>>* shifts,
+            AlignParam*                 aln_param );
+        void compute_alignment_param_m(
             const unsigned int          param_idx,
             const unsigned int          param_limit,
             const vector<array<float,2>>* shifts,

@@ -79,6 +79,7 @@ extern "C" void pre_align_fetch(
 
 
 extern "C" void pre_align_run( const int start_idx, const int stop_idx );
+extern "C" void* pre_align_run_m( const int start_idx, const int stop_idx );
 extern "C" void* mref_align_run( const int start_idx, const int stop_idx );
 extern "C" float* mref_align_run_m( const int start_idx, const int stop_idx );
 

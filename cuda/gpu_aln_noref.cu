@@ -486,6 +486,37 @@ extern "C" float* mref_align_run_m( const int start_idx, const int stop_idx){
 
 
 
+extern "C" void* pre_align_run_m( const int start_idx, const int stop_idx ){
+
+    //----------------------------------------------------------------[ setup ]
+
+    // grab batch handlers
+    BatchHandler* ref_batch = aln_res.ref_batch;
+    BatchHandler* sbj_batch = aln_res.sbj_batch;
+
+    // update reference
+    ref_batch->resample_to_polar( 0, 0, 0, aln_res.u_polar_sample_coords );
+    ref_batch->apply_FFT();
+
+    //------------------------------------------------------------[ alignment ]
+
+    for( unsigned int shift_idx=0; shift_idx < aln_res.shifts->size(); shift_idx++ ){
+        sbj_batch->resample_to_polar( 
+            (*aln_res.shifts)[shift_idx][0],
+            (*aln_res.shifts)[shift_idx][1], start_idx,
+            aln_res.u_polar_sample_coords );
+        sbj_batch->apply_FFT();
+        sbj_batch->ccf_mult( ref_batch, shift_idx, 0 );
+    }
+    sbj_batch->apply_IFFT();
+    CUDA_ERR_CHK( cudaDeviceSynchronize() );
+
+    sbj_batch->compute_alignment_param( start_idx, stop_idx, aln_res.shifts, aln_res.u_aln_param );
+    sbj_batch->apply_alignment_param( aln_res.u_aln_param, start_idx );  // NOTE: includes device sync at the end
+
+    return sbj_batch->get_apply_ptr();
+}
+
 extern "C" void pre_align_run( const int start_idx, const int stop_idx ){
 
     //----------------------------------------------------------------[ setup ]

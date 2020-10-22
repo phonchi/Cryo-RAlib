@@ -12,7 +12,7 @@ We compared the CPU implementation from EMAN2 and use [Ribosome 80s](https://www
 
 ![](https://i.imgur.com/GkXidsN.png)
 
-The speedup is 22x~37x with differenc reference number.
+The speedup is 22x~37x with different reference number.
 
 ## 1. Install 
 - Install `EMAN2` and `Sphire`: 

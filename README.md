@@ -8,10 +8,10 @@ Team member:  [Szu Chi Chung](https://github.com/phonchi), [Cheng-Yu Hung](https
 Mentor: Ryan Jeng, Nvidia
 
 
-* Reference-free alignment (Averge of first 10 iteration)
+* Reference-free alignment (Average of the first 10 iteration)
 ![](https://i.imgur.com/4Je3oTt.png)
 
-* Multireference alignment (Class average)
+* Multireference alignment (Class averages)
 ![](https://i.imgur.com/Fhz8VgW.png)
 
 

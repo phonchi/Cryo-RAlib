@@ -7,6 +7,12 @@ Team member:  [Szu Chi Chung](https://github.com/phonchi), [Cheng-Yu Hung](https
 
 Mentor: Ryan Jeng, Nvidia
 
+## Benchmark
+We compared the CPU implementation from EMAN2 and use [Ribosome 80s](https://www3.mrc-lmb.cam.ac.uk/relion/index.php?title=Benchmarks_%26_computer_hardware) but downsampling to 90 pixels. The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance. The `xr`, `yr`, `ou`, `maxit` is set to 3,3,36,6 respectively. 
+
+![](https://i.imgur.com/GkXidsN.png)
+
+The speedup is 22x~37x with differenc reference number.
 
 ## 1. Install 
 - Install `EMAN2` and `Sphire`: 
@@ -18,5 +24,8 @@ Mentor: Ryan Jeng, Nvidia
 - `$ ./install.sh`
 
 ## 3. Test
-- `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py image_stack.hdf  ref_stack.hdf out --ou=36 --xr=1 --yr=1`
-- `mpirun -np 4 test_mref_gpu_align.py image_stack.hdf  ref_stack.hdf out --ou=36 --xr=1 --yr=1`
+### Reference-free alignment
+- `mpirun -np 4 test_reffree_gpu_align.py image_stack.hdf  out --ou=36 --xr=3 --yr=3`
+### Multi-reference alignment
+- `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py image_stack.hdf  ref_stack.hdf out --ou=36 --xr=3 --yr=3`
+- `mpirun -np 4 test_mref_gpu_align.py image_stack.hdf  ref_stack.hdf out --ou=36 --xr=3 --yr=3`

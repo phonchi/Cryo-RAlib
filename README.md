@@ -1,4 +1,4 @@
-# Multireferece_alignment
+# RAlib - Accelrating multireferece alignment
 
 This is the repository that contains gpu-accelerated multireference alignment code for cryo-EM image processing.
 The code is used in the 2020 NCHC GPU Hackathon.

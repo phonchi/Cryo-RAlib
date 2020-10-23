@@ -8,13 +8,11 @@ Team member:  [Szu Chi Chung](https://github.com/phonchi), [Cheng-Yu Hung](https
 Mentor: Ryan Jeng, Nvidia
 
 
-* Reference-free alignment (Average of the first 10 iteration)
-![](https://i.imgur.com/4Je3oTt.png)
-
 * Multireference alignment (Class averages)
 ![](https://i.imgur.com/Fhz8VgW.png)
 
-
+* Reference-free alignment (Average of the first 10 iteration)
+![](https://i.imgur.com/4Je3oTt.png)
 
 ## Benchmark
 * Multireference alignment
@@ -23,6 +21,15 @@ We compared the CPU implementation from EMAN2 and use [Ribosome 80s](https://www
 ![](https://i.imgur.com/GkXidsN.png)
 
 The speedup is 22x~37x with different reference number.
+
+* Reference-free alignment
+
+The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance. The `ts`, `ou`, `maxit` is set to 1,36,6 respectively. 
+
+![](https://i.imgur.com/mzDF63c.png)
+
+
+The speedup is 2.4x~9.4x with different 2D shift.
 
 ## How to use
 ### 1. Install 
@@ -37,8 +44,9 @@ The speedup is 22x~37x with different reference number.
 ### 3. Test
 Test data can be downloaded from [here](https://drive.google.com/drive/folders/1BWquinGRMQixtlmjx6edA-LGgzXhldft?usp=sharing).
 
-*  Reference-free alignment
-- `mpirun -np 4 test_reffree_gpu_align.py rib80s_ori_bin.hdf  out --ou=36 --xr=3 --yr=3`
 *  Multi-reference alignment
-- `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py rib80s_ori_bin.hdf  rib80s_ref.hdf out --ou=36 --xr=3 --yr=3`
-- `mpirun -np 4 test_mref_gpu_align.py rib80s_ori_bin.hdf  rib80s_ref.hdf out --ou=36 --xr=3 --yr=3`
+    - `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py rib80s_ori_bin.hdf  rib80s_ref.hdf out --ou=36 --xr=3 --yr=3`
+    - `mpirun -np 4 test_mref_gpu_align.py rib80s_ori_bin.hdf  rib80s_ref.hdf out --ou=36 --xr=3 --yr=3`
+
+*  Reference-free alignment
+    - `mpirun -np 4 test_reffree_gpu_align.py rib80s_ori_bin.hdf  out --ou=36 --xr=3 --yr=3 --ts=1`

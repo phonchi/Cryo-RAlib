@@ -35,7 +35,7 @@ The speedup is 2.4x~9.4x with different 2D shift.
 ### 1. Install 
 - Install `EMAN2` and `Sphire`: 
     * Please install [`EMAN2.31`](https://blake.bcm.edu/emanwiki/EMAN2/Install).
-    * If you would like to use the version that use CuPy install according to [here](https://github.com/cupy/cupy).
+    * If you would like to use the version that use CuPy, please install according to [here](https://github.com/cupy/cupy).
 >    Note you may need to relink the nvrtc library `ln -s /usr/local/cuda/lib64/libnvrtc-builtins.so.10.0.130 /usr/local/EMAN2/lib/libnvrtc-builtins.so`
 
 ### 2. Setup

@@ -31,7 +31,7 @@ The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance.
 
 The speedup is 2.4x~9.4x with different 2D shift.
 
-## How to use
+## How to use the library
 ### 1. Install 
 - Install `EMAN2` and `Sphire`: 
     * Please install [`EMAN2.31`](https://blake.bcm.edu/emanwiki/EMAN2/Install).
@@ -50,3 +50,6 @@ Test data can be downloaded from [here](https://drive.google.com/drive/folders/1
 
 *  Reference-free alignment
     - `mpirun -np 4 test_reffree_gpu_align.py rib80s_ori_bin.hdf  out --ou=36 --xr=3 --yr=3 --ts=1`
+
+## Notebook
+The python environment expose by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visulization. See the [Example Notebook](CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.

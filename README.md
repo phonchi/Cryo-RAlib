@@ -1,4 +1,4 @@
-# RAlib - Accelrating multireferece alignment
+# RAlib - Accelrating multireference alignment
 
 This is the repository that contains gpu-accelerated multireference alignment code for cryo-EM image processing.
 The code is used in the 2020 NCHC GPU Hackathon.
@@ -11,12 +11,12 @@ Mentor: Ryan Jeng, Nvidia
 * Multireference alignment (Class averages)
 ![](https://i.imgur.com/Fhz8VgW.png)
 
-* Reference-free alignment (Average of the first 10 iteration)
+* Reference-free alignment (Average of the first 10 iterations)
 ![](https://i.imgur.com/4Je3oTt.png)
 
 ## Benchmark
 * Multireference alignment
-We compared the CPU implementation from EMAN2 and use [Ribosome 80s](https://www3.mrc-lmb.cam.ac.uk/relion/index.php?title=Benchmarks_%26_computer_hardware) but downsampling to 90 pixels. The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance. The `xr`, `yr`, `ou`, `maxit` is set to 3,3,36,6 respectively. 
+We compared the CPU implementation from EMAN2 and used [Ribosome 80s benchmark dataset](https://www3.mrc-lmb.cam.ac.uk/relion/index.php?title=Benchmarks_%26_computer_hardware) but downsampling to 90 pixels. The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance. The `xr`, `yr`, `ou`, `maxit` is set to 3,3,36,6 respectively. 
 
 ![](https://i.imgur.com/GkXidsN.png)
 
@@ -35,7 +35,7 @@ The speedup is 2.4x~9.4x with different 2D shift.
 ### 1. Install 
 - Install `EMAN2` and `Sphire`: 
     * Please install [`EMAN2.31`](https://blake.bcm.edu/emanwiki/EMAN2/Install).
-    * If you would like to use the version that use CuPy, please install according to [here](https://github.com/cupy/cupy).
+    * If you would like to use the version that uses CuPy, please install according to [here](https://github.com/cupy/cupy).
 >    Note you may need to relink the nvrtc library `ln -s /usr/local/cuda/lib64/libnvrtc-builtins.so.10.0.130 /usr/local/EMAN2/lib/libnvrtc-builtins.so`
 
 ### 2. Setup
@@ -52,4 +52,7 @@ Test data can be downloaded from [here](https://drive.google.com/drive/folders/1
     - `mpirun -np 4 test_reffree_gpu_align.py rib80s_ori_bin.hdf  out --ou=36 --xr=3 --yr=3 --ts=1`
 
 ## Notebook
-The python environment expose by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visulization. See the [Example Notebook](CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.
+The python environment exposed by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visualization. See the [Example Notebook](CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.
+
+## Credit
+The code is modified from [gpu_isac2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac)

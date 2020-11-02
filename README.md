@@ -1,4 +1,4 @@
-# Cryo-RAlib - Accelrating multireference alignment
+# Cryo-RAlib - Accelrating alignment in cryo-EM
 
 This is the repository that contains gpu-accelerated multireference alignment code for cryo-EM image processing.
 The code is used in the 2020 NCHC GPU Hackathon.
@@ -55,4 +55,4 @@ Test data can be downloaded from [here](https://drive.google.com/drive/folders/1
 The python environment exposed by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visualization. See the [Example Notebook](CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.
 
 ## Credit
-Some of the code is built upon Cuda code from [gpu_isac2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac)
+Some of the code is built upon Cuda code from [gpu_isac2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac).

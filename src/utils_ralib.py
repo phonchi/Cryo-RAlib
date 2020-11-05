@@ -52,7 +52,7 @@ class HDFfile():
             dataset = np.stack([dataset[i].numpy() for i in range(len(dataset))]).astype(np.float32)
         return dataset
         
-
+# part of the code is from cryodrgn
 class Starfile():
     
     def __init__(self, headers, df):

@@ -54,7 +54,7 @@ Test data can be downloaded from [here](https://drive.google.com/drive/folders/1
 ## Notebook
 The python environment exposed by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visualization. See the [Example Notebook](notebook/02_CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.
 
-The library can be used for exploratory data analysis as demonstrated in the notebook. You will need the [utils_ralib.py](src/utils_ralib.py) for analysis.
+The library can be used for exploratory data analysis as demonstrated in the notebook. You will need the [utils_ralib.py](src/utils_ralib.py) and [scikit-learn](https://scikit-learn.org/stable/) for analysis.
 
 ## Credit
 Some of the code is built upon Cuda code from [gpu_isac 2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac).

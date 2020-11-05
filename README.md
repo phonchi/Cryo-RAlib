@@ -52,7 +52,9 @@ Test data can be downloaded from [here](https://drive.google.com/drive/folders/1
     - `mpirun -np 4 test_reffree_gpu_align.py rib80s_ori_bin.hdf  out --ou=36 --xr=3 --yr=3 --ts=1`
 
 ## Notebook
-The python environment exposed by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visualization. See the [Example Notebook](CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.
+The python environment exposed by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visualization. See the [Example Notebook](notebook/02_CuPy_Image_Processing_rot_shift2d.ipynb) where we accelerate the rotation and shift operations by five-fold and visualize the results.
+
+The library can be used for exploratory data analysis as demonstrated in the notebook.
 
 ## Credit
-Some of the code is built upon Cuda code from [gpu_isac2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac).
+Some of the code is built upon Cuda code from [gpu_isac 2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac).

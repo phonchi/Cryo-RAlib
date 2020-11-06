@@ -130,6 +130,8 @@ class CcfResultTable{
         float* u_ccf_batch_table;   // table for subject/reference cross correlation results
         // ccf max table
         int* u_max_idx;             // pos[i] holds index position for max(row[i])
+        // ccf correlation
+        float* u_max_cor;             // the correlation when comparing to the referenced image
         // cuda handles
         cufftHandle cufft_pln;      // CUDA plan for the IFFT
 

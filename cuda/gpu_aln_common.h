@@ -80,6 +80,7 @@ struct AlignParam{
     float shift_y=0;
     float angle=0.0f;
     bool  mirror=false;
+    float correlation=0;
 };
 
 //========================================================[ utility functions ]

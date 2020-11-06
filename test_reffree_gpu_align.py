@@ -94,7 +94,8 @@ class AlignParam( ctypes.Structure, Freezeable ):
                  ("shift_x", ctypes.c_float),
                  ("shift_y", ctypes.c_float),
                  ("angle",   ctypes.c_float),
-                 ("mirror",  ctypes.c_bool) ]
+                 ("mirror",  ctypes.c_bool),
+                 ("correlation",  ctypes.c_float),]
     def __str__(self):
             return "s_%d/r_%d::(%d,%d;%.2f)" % (self.sbj_id, self.ref_id, self.shift_x, self.shift_y, self.angle) \
                     +("[M]" if self.mirror else "")
@@ -509,6 +510,11 @@ def ali2d_base_gpu_isac_CLEAN(
 
 
     mpi.mpi_barrier(mpi_comm)
+    
+    # ------------ plot correlation
+    correlations = np.array([ gpu_aln_param[k].correlation for k in range(len(data))])
+    np.save('correlations.npy', correlations)
+    del correlations
 
     for k, img in enumerate(data):
         # this is usually done in ormq()

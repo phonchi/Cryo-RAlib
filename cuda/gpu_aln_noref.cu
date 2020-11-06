@@ -216,7 +216,7 @@ extern "C" AlignParam* pre_align_init(
     CUDA_ERR_CHK( cudaMallocManaged(&(aln_res.u_aln_param), num_particles*sizeof(AlignParam)) );
     for( unsigned int i=0; i<num_particles; i++ )
         aln_res.u_aln_param[i].ref_id = 0;
-
+    
     // Create class id (cid) index (idx) list in unified memory. For pre-
     // alignment this is simply [0,limit] since we only have one reference
     CUDA_ERR_CHK( cudaMallocManaged(&aln_res.u_cid_idx, (aln_cfg->ref_num+1)*sizeof(unsigned int)) );
@@ -1302,7 +1302,7 @@ __device__ void cu_max_idx_op( const unsigned int i, const unsigned int off, flo
 }
 
 // batch-wise max_idx reduction: each block finds the max val and its idx within a range of size <len> within a continuous data array
-__global__ void cu_max_idx_batch( const float* data, unsigned int len, int* idx ){
+__global__ void cu_max_idx_batch( const float* data, unsigned int len, int* idx, float* val ){
     /*
     Based on: https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf
     */
@@ -1343,6 +1343,7 @@ __global__ void cu_max_idx_batch( const float* data, unsigned int len, int* idx 
     if(tid <  1) cu_max_idx_op(tid,  1, shared_data, shared_idx);
     // shared_idx[0] holds the max value; shared_idx[1] holds the index of the max in the original array
     if(tid == 0) idx[blockIdx.x] = shared_idx[1];
+    if(tid == 0) val[blockIdx.x] = shared_data[0];
 }
 
 
@@ -1457,6 +1458,7 @@ __global__ void cu_find_params(
     const unsigned int ring_len,
     const float* u_ccf_batch_table, 
     const int* u_max_idx,
+    const float* u_max_cor,    
     float shift_limit
     )
 {
@@ -1490,6 +1492,7 @@ __global__ void cu_find_params(
             if( tmp_param->angle >= 360.0 )
                 tmp_param->angle -= 360.0;
         }
+        tmp_param->correlation = u_max_cor[bid];
     }
 }
 
@@ -2132,7 +2135,9 @@ CcfResultTable::CcfResultTable( const AlignConfig* batch_cfg ){
 
     // allocate space for the results of reverse engineering the alignment parameters per sbj img
     u_max_idx=NULL;
+    u_max_cor = NULL;
     CUDA_ERR_CHK( cudaMallocManaged(&u_max_idx, sbj_num*sizeof(unsigned int)) );
+    CUDA_ERR_CHK( cudaMallocManaged(&u_max_cor, sbj_num*sizeof(float)) );
 
     // cuda handles
     CUFFT_ERR_CHK( cufftPlan1d(&cufft_pln, ring_len, CUFFT_C2R, entry_num()) );
@@ -2142,6 +2147,7 @@ CcfResultTable::CcfResultTable(){
     sbj_num = ref_num = ring_num = ring_len = shift_num = 0;
     u_ccf_batch_table = NULL;
     u_max_idx = NULL;
+    u_max_cor = NULL;
     cufft_pln = 0;
 }
 
@@ -2153,6 +2159,10 @@ CcfResultTable::~CcfResultTable(){
     if( u_max_idx != NULL ){
         CUDA_ERR_CHK( cudaFree(u_max_idx) );
         u_max_idx = NULL;
+    }
+    if( u_max_cor != NULL ){
+        CUDA_ERR_CHK( cudaFree(u_max_cor) );
+        u_max_cor = NULL;
     }
     if( cufft_pln != 0 ){
         CUFFT_ERR_CHK( cufftDestroy(cufft_pln) );
@@ -2323,7 +2333,7 @@ void CcfResultTable::find_params(
 {
     float shift_limit = aln_res.aln_cfg->img_dim - aln_res.aln_cfg->ring_num - 2;
     //unsigned int threads = 128;
-    cu_find_params<<< sbj_num, 1>>>( param_idx, param_limit, u_shift, aln_param , mirror_off(), shift_off(), ref_off(), row_off(), ring_len, u_ccf_batch_table, u_max_idx, shift_limit);
+    cu_find_params<<< sbj_num, 1>>>( param_idx, param_limit, u_shift, aln_param , mirror_off(), shift_off(), ref_off(), row_off(), ring_len, u_ccf_batch_table, u_max_idx, u_max_cor, shift_limit);
     KERNEL_ERR_CHK();
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
 }
@@ -2331,7 +2341,7 @@ void CcfResultTable::find_params(
 
 void CcfResultTable::compute_max_indices_m() {
     unsigned int threads = 128;
-    cu_max_idx_batch<<< sbj_num, threads, (threads*sizeof(float)+threads*sizeof(unsigned int)) >>>( u_ccf_batch_table, row_off(), u_max_idx );
+    cu_max_idx_batch<<< sbj_num, threads, (threads*sizeof(float)+threads*sizeof(unsigned int)) >>>( u_ccf_batch_table, row_off(), u_max_idx, u_max_cor );
     KERNEL_ERR_CHK();
     CUDA_ERR_CHK( cudaDeviceSynchronize() );
     //for( unsigned int i=0; i<sbj_num; i++ )

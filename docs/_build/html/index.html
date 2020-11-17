@@ -1,0 +1,153 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cryo-RAlib: Accelrating alignment in cryo-EM &#8212; Cryo-RAlib  documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="How to use the library" href="install.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="cryo-ralib-accelrating-alignment-in-cryo-em">
+<h1>Cryo-RAlib: Accelrating alignment in cryo-EM<a class="headerlink" href="#cryo-ralib-accelrating-alignment-in-cryo-em" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="goals">
+<h2>Goals<a class="headerlink" href="#goals" title="Permalink to this headline">¶</a></h2>
+<p>Multireference alignment is a common algorithm in cryo-EM image processing.
+Cryo-RAlib provides a gpu-accelerated version of multireference alignment based on the <code class="docutils literal notranslate"><span class="pre">EMAN2</span></code> package.</p>
+<ul>
+<li><p>Multireference alignment (Class averages)</p>
+<a class="reference external image-reference" href="https://i.imgur.com/Fhz8VgW.png"><img alt="" src="https://i.imgur.com/Fhz8VgW.png" /></a>
+</li>
+<li><p>Reference-free alignment (Average of the first 10 iterations)</p>
+<a class="reference external image-reference" href="https://i.imgur.com/4Je3oTt.png"><img alt="" src="https://i.imgur.com/4Je3oTt.png" /></a>
+</li>
+</ul>
+<div class="section" id="benchmark">
+<h3>Benchmark<a class="headerlink" href="#benchmark" title="Permalink to this headline">¶</a></h3>
+<ul class="simple">
+<li><p>Multireference alignment
+We compared the CPU implementation from EMAN2 and used <a class="reference external" href="https://www3.mrc-lmb.cam.ac.uk/relion/index.php?title=Benchmarks_%26_computer_hardware">Ribosome 80s benchmark dataset</a> but downsampling to 90 pixels. The following chart is running on <a class="reference external" href="https://www.twcc.ai/">TWCC</a> c.super instance. The <code class="docutils literal notranslate"><span class="pre">xr</span></code>, <code class="docutils literal notranslate"><span class="pre">yr</span></code>, <code class="docutils literal notranslate"><span class="pre">ou</span></code>, <code class="docutils literal notranslate"><span class="pre">maxit</span></code> is set to 3,3,36,6 respectively.</p></li>
+</ul>
+<a class="reference external image-reference" href="https://i.imgur.com/GkXidsN.png"><img alt="" src="https://i.imgur.com/GkXidsN.png" /></a>
+<p>The speedup is 22x~37x with different reference number.</p>
+<ul class="simple">
+<li><p>Reference-free alignment</p></li>
+</ul>
+<p>The following chart is running on <a class="reference external" href="https://www.twcc.ai/">TWCC</a> c.super instance. The <code class="docutils literal notranslate"><span class="pre">ts</span></code>, <code class="docutils literal notranslate"><span class="pre">ou</span></code>, <code class="docutils literal notranslate"><span class="pre">maxit</span></code> is set to 1,36,6 respectively.</p>
+<a class="reference external image-reference" href="https://i.imgur.com/mzDF63c.png"><img alt="" src="https://i.imgur.com/mzDF63c.png" /></a>
+<p>The speedup is 2.4x~9.4x with different 2D shift.</p>
+</div>
+<div class="section" id="notebook">
+<h3>Notebook<a class="headerlink" href="#notebook" title="Permalink to this headline">¶</a></h3>
+<p>The python environment exposed by EMAN2 can be couple with CuPy and other libraries for drop-in acceleration and visualization. See the <a class="reference external" href="notebook/02_CuPy_Image_Processing_rot_shift2d.ipynb">Example Notebook</a> where we accelerate the rotation and shift operations by five-fold and visualize the results.</p>
+<p>The library can be used for exploratory data analysis as demonstrated in the notebook. You will need the <a class="reference external" href="src/utils_ralib.py">utils_ralib.py</a> and <a class="reference external" href="https://scikit-learn.org/stable/">scikit-learn</a> for analysis.</p>
+</div>
+</div>
+<div class="section" id="nchc-gpu-hackathon">
+<h2>2020 NCHC GPU Hackathon<a class="headerlink" href="#nchc-gpu-hackathon" title="Permalink to this headline">¶</a></h2>
+<p>The code is used in the 2020 NCHC GPU Hackathon.</p>
+<p>Team member:  <a class="reference external" href="https://github.com/phonchi">Szu Chi Chung</a>, <a class="reference external" href="https://github.com/veis5566">Cheng-Yu Hung</a>, <a class="reference external" href="https://github.com/oppty1335">Huei-Lun Siao</a>, <a class="reference external" href="https://github.com/Hungyi5">Hung-Yi Wu</a>, Institute of Statistical Science, Academia Sinica</p>
+<p>Mentor: Ryan Jeng, Nvidia</p>
+<div class="section" id="credit">
+<h3>Credit<a class="headerlink" href="#credit" title="Permalink to this headline">¶</a></h3>
+<p>Some of the code is built upon Cuda code from <a class="reference external" href="http://sphire.mpg.de/wiki/doku.php?id=gpu_isac">gpu_isac 2.3.2</a>.</p>
+<div class="toctree-wrapper compound">
+</div>
+</div>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="#">Cryo-RAlib</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="install.html">How to use the library</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial.html">Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="references.html">References</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="#">Documentation overview</a><ul>
+      <li>Next: <a href="install.html" title="next chapter">How to use the library</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;2020, Szu Chi Chung, Cheng-Yu Hung, Huei-Lun Siao, Hung-Yi Wu.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/index.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

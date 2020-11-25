@@ -4,11 +4,8 @@ from __future__ import print_function
 #* 
 #* GPU based reference free alignment
 #* 
-#* Author (C) Szu-Chi Chung 2020 (steve2003121@gmail.com)
-#*            Cheng-Yu Hung 2020 (veisteak@gmail.com)
-#*            Huei-Lun Siao 2020 (oppty1335@gmail.com)
-#*            Hung-Yi Wu 2020 (say66969@gmail.com)
-#*            Markus Stabrin 2019 (markus.stabrin@mpi-dortmund.mpg.de)
+#*  
+#* Author (C) Markus Stabrin 2019 (markus.stabrin@mpi-dortmund.mpg.de)
 #*            Fabian Schoenfeld 2019 (fabian.schoenfeld@mpi-dortmund.mpg.de)
 #*            Thorsten Wagner 2019 (thorsten.wagner@mpi-dortmund.mpg.de)
 #*            Tapu Shaikh 2019 (tapu.shaikh@mpi-dortmund.mpg.de)
@@ -17,7 +14,6 @@ from __future__ import print_function
 #*            Toshio Moriya 2019 (toshio.moriya@kek.jp)
 #*            Pawel A.Penczek, 09/09/2006 (Pawel.A.Penczek@uth.tmc.edu)
 #*
-#*  Copyright (C) 2020 SABID Laboratory, Institute of Statistical Science, Academia Sinica
 #*  Copyright (c) 2019 Max Planck Institute of Molecular Physiology
 #*  Copyright (c) 2000-2006 The University of Texas - Houston Medical School
 #* 

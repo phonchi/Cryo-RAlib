@@ -56,5 +56,8 @@ The python environment exposed by EMAN2 can be couple with CuPy and other librar
 
 The library can be used for exploratory data analysis as demonstrated in the notebook. You will need the [utils_ralib.py](src/utils_ralib.py) and [scikit-learn](https://scikit-learn.org/stable/) for analysis.
 
+## License
+Cryo-RAlib is open source software released under the [GNU General Public License, Version 3](https://github.com/phonchi/Cryo-RAlib/blob/master/LICENSE).
+
 ## Credit
 Some of the code is built upon Cuda code from [gpu_isac 2.3.2](http://sphire.mpg.de/wiki/doku.php?id=gpu_isac).

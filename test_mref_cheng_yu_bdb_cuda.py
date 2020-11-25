@@ -2,7 +2,7 @@
 
 #******************************************************************************
 #* 
-#* GPU based reference free alignment
+#* GPU based GPU based multireference alignment
 #* 
 #* Author (C) Szu-Chi Chung 2020 (steve2003121@gmail.com)
 #*            Cheng-Yu Hung 2020 (veisteak@gmail.com)

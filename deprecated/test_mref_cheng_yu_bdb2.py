@@ -1,6 +1,39 @@
 #!/usr/local/EMAN2/bin/python
 from __future__ import print_function
-
+#******************************************************************************
+#* 
+#* GPU based multireference alignment using CuPy
+#* 
+#* Author (C) Szu-Chi Chung 2020 (steve2003121@gmail.com)
+#*            Cheng-Yu Hung 2020 (veisteak@gmail.com)
+#*            Huei-Lun Siao 2020 (oppty1335@gmail.com)
+#*            Hung-Yi Wu 2020 (say66969@gmail.com)
+#*            Markus Stabrin 2019 (markus.stabrin@mpi-dortmund.mpg.de)
+#*            Fabian Schoenfeld 2019 (fabian.schoenfeld@mpi-dortmund.mpg.de)
+#*            Thorsten Wagner 2019 (thorsten.wagner@mpi-dortmund.mpg.de)
+#*            Tapu Shaikh 2019 (tapu.shaikh@mpi-dortmund.mpg.de)
+#*            Adnan Ali 2019 (adnan.ali@mpi-dortmund.mpg.de)
+#*            Luca Lusnig 2019 (luca.lusnig@mpi-dortmund.mpg.de)
+#*            Toshio Moriya 2019 (toshio.moriya@kek.jp)
+#*            Pawel A.Penczek, 09/09/2006 (Pawel.A.Penczek@uth.tmc.edu)
+#*
+#*  Copyright (C) 2020 SABID Laboratory, Institute of Statistical Science, Academia Sinica
+#*  Copyright (c) 2019 Max Planck Institute of Molecular Physiology
+#*  Copyright (c) 2000-2006 The University of Texas - Houston Medical School
+#* 
+#*    This program is free software: you can redistribute it and/or modify it 
+#* under the terms of the GNU General Public License as published by the Free 
+#* Software Foundation, either version 3 of the License, or (at your option) any
+#* later version.
+#* 
+#*    This program is distributed in the hope that it will be useful, but WITHOUT
+#* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+#* FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+#* 
+#*    You should have received a copy of the GNU General Public License along with
+#* this program.  If not, please visit: http://www.gnu.org/licenses/
+#* 
+#******************************************************************************/
 import os
 import global_def
 from global_def import *

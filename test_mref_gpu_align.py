@@ -2,13 +2,24 @@
 
 #******************************************************************************
 #* 
-#* GPU based reference free alignment
+#* GPU based multireference alignment using CuPy
 #* 
-#* Author (C) 2020, Szu-Chi Chung (steve2003121@gmail.com)
-#*            2020, Cheng-Yu Hung (veisteak@gmail.com)
-#*            2020, Huei-Lun Siao (oppty1335@gmail.com)
-#*            2020, Hung-Yi Wu (say66969@gmail.com)
-#* Copyright (C) 2020,Copyright (C) 2020, SABID Laboratory, Institute of Statistical Science, Academia Sinica
+#* Author (C) Szu-Chi Chung 2020 (steve2003121@gmail.com)
+#*            Cheng-Yu Hung 2020 (veisteak@gmail.com)
+#*            Huei-Lun Siao 2020 (oppty1335@gmail.com)
+#*            Hung-Yi Wu 2020 (say66969@gmail.com)
+#*            Markus Stabrin 2019 (markus.stabrin@mpi-dortmund.mpg.de)
+#*            Fabian Schoenfeld 2019 (fabian.schoenfeld@mpi-dortmund.mpg.de)
+#*            Thorsten Wagner 2019 (thorsten.wagner@mpi-dortmund.mpg.de)
+#*            Tapu Shaikh 2019 (tapu.shaikh@mpi-dortmund.mpg.de)
+#*            Adnan Ali 2019 (adnan.ali@mpi-dortmund.mpg.de)
+#*            Luca Lusnig 2019 (luca.lusnig@mpi-dortmund.mpg.de)
+#*            Toshio Moriya 2019 (toshio.moriya@kek.jp)
+#*            Pawel A.Penczek, 09/09/2006 (Pawel.A.Penczek@uth.tmc.edu)
+#*
+#*  Copyright (C) 2020 SABID Laboratory, Institute of Statistical Science, Academia Sinica
+#*  Copyright (c) 2019 Max Planck Institute of Molecular Physiology
+#*  Copyright (c) 2000-2006 The University of Texas - Houston Medical School
 #* 
 #*    This program is free software: you can redistribute it and/or modify it 
 #* under the terms of the GNU General Public License as published by the Free 

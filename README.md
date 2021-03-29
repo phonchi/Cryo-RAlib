@@ -1,6 +1,6 @@
 # Cryo-RAlib - Accelrating alignment in cryo-EM
 
-This is the repository that contains gpu-accelerated multireference alignment code for cryo-EM image processing.
+This is the repository that contains GPU-accelerated multireference alignment code for cryo-EM image processing.
 The code is used in the 2020 NCHC GPU Hackathon.
 
 Team member:  [Szu Chi Chung](https://github.com/phonchi), [Cheng-Yu Hung](https://github.com/veis5566), [Huei-Lun Siao](https://github.com/oppty1335), [Hung-Yi Wu](https://github.com/Hungyi5), Institute of Statistical Science, Academia Sinica
@@ -29,7 +29,7 @@ The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance.
 ![](https://i.imgur.com/mzDF63c.png)
 
 
-The speedup is 2.4x~9.4x with different 2D shift.
+The speedup is 2.4x~9.4x with different 2D shifts.
 
 ## How to use the library
 ### 1. Install 
@@ -40,9 +40,10 @@ The speedup is 2.4x~9.4x with different 2D shift.
 
 ### 2. Setup
 - `$ ./install.sh`
+- You may need to modify the shebang line in the python scripts to point out the location of the EMAN2 library. 
 
 ### 3. Test
-Test data can be downloaded from [here](https://drive.google.com/drive/folders/1BWquinGRMQixtlmjx6edA-LGgzXhldft?usp=sharing).
+Test data can be downloaded from [here](https://drive.google.com/drive/folders/1BWquinGRMQixtlmjx6edA-LGgzXhldft?usp=sharing). See the [Example Notebook](notebook/00_Multireference_Alignment.ipynb) for more details.
 
 *  Multi-reference alignment
     - `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py rib80s_ori_bin.hdf  rib80s_ref.hdf out --ou=36 --xr=3 --yr=3`

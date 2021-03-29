@@ -14,6 +14,12 @@ Mentor: Ryan Jeng, Nvidia
 * Reference-free alignment (Average of the first 10 iterations)
 ![](https://i.imgur.com/4Je3oTt.png)
 
+## Manuscript:
+
+Cryo-RALib -- a modular library for accelerating alignment in cryo-EM. Szu-Chi Chung, Cheng-Yu Hung, Huei-Lun Siao, Hung-Yi Wu, Wei-Hau Chang, I-Ping Tu. https://arxiv.org/abs/2011.05755
+
+
+
 ## Benchmark
 * Multireference alignment
 We compared the CPU implementation from EMAN2 and used [Ribosome 80s benchmark dataset](https://www3.mrc-lmb.cam.ac.uk/relion/index.php?title=Benchmarks_%26_computer_hardware) but downsampling to 90 pixels. The following chart is running on [TWCC](https://www.twcc.ai/) c.super instance. The `xr`, `yr`, `ou`, `maxit` is set to 3,3,36,6 respectively. 

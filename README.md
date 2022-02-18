@@ -49,7 +49,7 @@ The speedup is 2.4x~9.4x with different 2D shifts.
 - You may need to modify the shebang line in the python scripts to point out the location of the EMAN2 library. 
 
 ### 3. Test
-Test data can be downloaded from [here](https://drive.google.com/drive/folders/1BWquinGRMQixtlmjx6edA-LGgzXhldft?usp=sharing). See the [Example Notebook](notebook/00_Multireference_Alignment.ipynb) for more details.
+Test data can be downloaded from [here](https://www.dropbox.com/sh/okucscfizvqog8i/AAAoQnKsA2W4iTlOqsBPdL3Ua?dl=0). See the [Example Notebook](notebook/00_Multireference_Alignment.ipynb) for more details.
 
 *  Multi-reference alignment
     - `mpirun -np 4 test_mref_cheng_yu_bdb_cuda.py rib80s_ori_bin.hdf  rib80s_ref.hdf out --ou=36 --xr=3 --yr=3`

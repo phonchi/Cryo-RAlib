@@ -44,6 +44,7 @@ def main(args):
     # check MPI
     try:
         ver = subprocess.check_output( "conda list pydusa", shell=True, stderr=subprocess.STDOUT )
+        ver = str(ver.decode('utf-8'))
         ver = [ entry for entry in ver.split("\n") if not "#" in entry and entry != "" ][0]
         ver = " ".join(ver.split())
     
@@ -64,6 +65,7 @@ def main(args):
     # check CUDA installation
     try:
         ver = subprocess.check_output( "nvcc --version", shell=True, stderr=subprocess.STDOUT )
+        ver = str(ver.decode('utf-8'))
         ver = [ entry for entry in ver.split("\n") if entry != "" ]
     
     except subprocess.CalledProcessError as err:
